@@ -26,6 +26,7 @@ function Enemy:init(lane)
     self.progress = 0
     self.speed = 1 / 5
     self.frameCount = 150
+    self.pushed = false
 
     --full screen sprite 
     self:setCenter(0,0)
@@ -33,14 +34,31 @@ function Enemy:init(lane)
     self:add() 
 end
 
-function Enemy:update()
-    self.progress += self.speed / 30
+function Enemy:push() 
+    self.pushed = true 
+end
 
-    if self.progress >= 1 then
-        self.reachedEnd = true --signals main.lua to deal damage
-        self:remove()
-        self.dead = true 
-        return
+function Enemy:update()
+    if self.pushed then 
+        --Move backwards at double speed 
+        self.progress -= (self.speed*2)/30
+
+        --Reached the far end of the lane -> simply destroyed, no player damage 
+        if self.progress <= 0 then
+            self.dead = true
+            self:remove()
+            return
+        end
+    else
+        -- Normal Advance towards the player
+        self.progress += self.speed / 30
+
+        if self.progress >= 1 then
+            self.reachedEnd = true --signals main.lua to deal damage
+            self:remove()
+            self.dead = true 
+            return
+        end
     end
     local offset = self.lane - currentPlayerLane
     local absOffset = math.abs(offset)
@@ -57,7 +75,10 @@ function Enemy:update()
         tableToUse = enemyTwo
         if offset < 0 then flip = gfx.kImageFlippedX end
     end
-local frame = math.min(math.floor(self.progress * (self.frameCount - 1)) + 1, self.frameCount)
+    local frame = math.min(
+        math.max(1, math.floor(self.progress * (self.frameCount - 1)) + 1),
+        self.frameCount
+    )
     self:setImage(tableToUse:getImage(frame))
     self:setImageFlip(flip)
 end

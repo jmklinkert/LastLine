@@ -6,6 +6,7 @@ import "CoreLibs/sprites"
 import "CoreLibs/ui"
 import "enemy"
 import "menuScreen"
+import "stamina"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -58,6 +59,38 @@ local enemies = {}
 local spawnTimer = 150 -- 5 Seconds at 30 Hz
 
 
+
+-- ─── Wave / Difficulty System ─────────────────────────────────────────────────
+--
+local WAVE_INTERVAL_START = 5 * 30   -- frames (5 s at 30 Hz)
+local WAVE_INTERVAL_MIN   = 3 * 30   -- frames (3 s at 30 Hz)
+local ENEMIES_START       = 2
+local ENEMIES_MAX         = 6
+local RAMP_EVERY          = 2        -- waves between each difficulty step
+local RAMP_STEPS          = 4        -- ramp 0..4
+ 
+-- Returns the ramp level (0–RAMP_STEPS) for a given completed-wave count
+local function rampLevel(waveCount)
+    return math.min(RAMP_STEPS, math.floor(waveCount / RAMP_EVERY))
+end
+ 
+local function waveInterval(waveCount)
+    return math.max(WAVE_INTERVAL_MIN,
+                    WAVE_INTERVAL_START - rampLevel(waveCount) * 15)
+end
+ 
+local function enemiesPerWave(waveCount)
+    return math.min(ENEMIES_MAX, ENEMIES_START + rampLevel(waveCount))
+end
+ 
+-- Wave state (reset in switchToGame)
+local waveCount  = 0   -- fully-spawned waves so far
+local waveTimer  = 0   -- frames until the next wave begins
+local spawnQueue = 0   -- enemies still to be spawned in the current wave
+local spawnDelay = 0   -- frames until the next queued enemy is spawned
+
+
+
 -- ─── Scene helpers ──────────────────────────────────────────────────────────
 
 local function updateBg()
@@ -88,6 +121,14 @@ local function switchToGame()
     playerLives = MAX_Lives
     playerLane = MIDDLELANE
     spawnTimer = 150
+    Stamina.reset()
+
+    -- Reset wave state; first wave arrives after a full interval
+    waveCount  = 0
+    waveTimer  = waveInterval(0)
+    spawnQueue = 0
+    spawnDelay = 0
+
 
     background:add()
     updateBg()
@@ -98,7 +139,6 @@ end
 -- ─── Boot into menu ─────────────────────────────────────────────────────────
  
 MenuScreen.enter()
-
 
 -- ─── Input ──────────────────────────────────────────────────────────────────
  
@@ -129,6 +169,10 @@ function pd.AButtonDown()
         return
     end
 
+    if not Stamina.canPunch() then return end
+
+    Stamina.drain()
+
     --In-Game: Punch behaviour 
     for i = #enemies, 1, -1 do
         local e = enemies[i]
@@ -139,6 +183,19 @@ function pd.AButtonDown()
     end
 end 
 
+function pd.BButtonDown()
+    if currentScene ~= SCENE_GAME then return end
+    if not Stamina.canSuperPunch() then return end 
+
+    Stamina.drainBonus()
+
+    for i = 1, #enemies do 
+        local e = enemies[i]
+        if not e.dead and e:canBeHit(playerLane, playerRange) then 
+            e:push()
+        end
+    end
+end
 
 -- ─── Update loop ────────────────────────────────────────────────────────────
  
@@ -166,10 +223,30 @@ function pd.update()
     end
 
 
-    spawnTimer -= 1
-    if spawnTimer <= 0 then
-        spawnEnemy()
-        spawnTimer = 150
+    -- Wave spawning logic
+    if spawnQueue > 0 then
+        -- Mid-wave: count down to the next enemy in the burst
+        spawnDelay -= 1
+        if spawnDelay <= 0 then
+            spawnEnemy()
+            spawnQueue -= 1
+            if spawnQueue > 0 then
+                -- More enemies to come; wait some frames before the next one
+                spawnDelay = math.random(15, 18)
+            else
+                -- Wave fully spawned; increment counter and arm the next-wave timer
+                waveCount += 1
+                waveTimer  = waveInterval(waveCount)
+            end
+        end
+    else
+        -- Between waves: count down to the next wave
+        waveTimer -= 1
+        if waveTimer <= 0 then
+            -- Start a new wave; first enemy spawns immediately (spawnDelay = 0)
+            spawnQueue = enemiesPerWave(waveCount)
+            spawnDelay = 0
+        end
     end
 
 
@@ -177,8 +254,29 @@ function pd.update()
     gfx.sprite.update()
 
 
-    --Clean up dead Enemies. Enemies that reached the end deal 1 damage.
 
+    --Pushed-Enemy Collision: Pushed Enemies defeat other enemies they catch up with
+
+    for i = 1, #enemies do 
+        local pe = enemies[i]
+        if pe.pushed and not pe.dead then
+            for j = 1, #enemies do
+                local re = enemies[j]
+                if i ~= j
+                and not re.pushed
+                and not re.dead 
+                and re.lane == pe.lane 
+                and pe.progress <= re.progress
+                then 
+                    re.dead = true
+                    re:remove()
+                end
+            end
+        end
+    end
+
+
+    --Clean up dead Enemies. Enemies that reached the end deal 1 damage.
     for i = #enemies, 1, -1 do 
         local e = enemies[i]
         if e.dead then 
@@ -188,7 +286,7 @@ function pd.update()
             table.remove(enemies,i) 
         end
     end
-
+    Stamina.update()
     drawHearts()
     pd.drawFPS(0,220)
 end 
