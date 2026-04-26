@@ -5,10 +5,17 @@ import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "CoreLibs/ui"
 import "enemy"
+import "menuScreen"
 
 -- Localizing commonly used globals
 local pd = playdate
 local gfx = playdate.graphics
+
+
+--Scenes
+local SCENE_MENU = "menu"
+local SCENE_GAME = "game"
+local currentScene = SCENE_MENU
 
 --background
 local bgMiddle = gfx.image.new("images/tunnel_m.png")
@@ -18,7 +25,6 @@ local background = gfx.sprite.new()
 background:setCenter(0,0)
 background:moveTo(0,0)
 background:setZIndex(0)
-background:add()
 
 
 --lanes
@@ -52,8 +58,7 @@ local enemies = {}
 local spawnTimer = 150 -- 5 Seconds at 30 Hz
 
 
-
-
+-- ─── Scene helpers ──────────────────────────────────────────────────────────
 
 local function updateBg()
     if playerLane == LEFTLANE then
@@ -68,7 +73,35 @@ local function updateBg()
     end
 end
 
-updateBg()
+
+local function switchToMenu() 
+    --Remove all enemies
+    for i = #enemies, 1, -1 do
+        enemies[i]:remove() 
+        table.remove(enemies,i) 
+    end
+    currentScene = SCENE_MENU
+    MenuScreen.enter()    
+end
+
+local function switchToGame()
+    playerLives = MAX_Lives
+    playerLane = MIDDLELANE
+    spawnTimer = 150
+
+    background:add()
+    updateBg()
+
+    currentScene = SCENE_GAME
+end
+
+-- ─── Boot into menu ─────────────────────────────────────────────────────────
+ 
+MenuScreen.enter()
+
+
+-- ─── Input ──────────────────────────────────────────────────────────────────
+ 
 
 function pd.leftButtonDown()
     if playerLane == RIGHTLANE then
@@ -90,6 +123,13 @@ end
 
 
 function pd.AButtonDown() 
+
+    if currentScene == SCENE_MENU then
+        switchToGame() 
+        return
+    end
+
+    --In-Game: Punch behaviour 
     for i = #enemies, 1, -1 do
         local e = enemies[i]
         if e:canBeHit(playerLane, playerRange) then
@@ -100,6 +140,8 @@ function pd.AButtonDown()
 end 
 
 
+-- ─── Update loop ────────────────────────────────────────────────────────────
+ 
 local function spawnEnemy() 
     local enemyLane = math.random(1, 3) -- use 1–3 to match your LEFTLANE/MIDDLELANE/RIGHTLANE constants
     local enemy = Enemy(enemyLane)
@@ -108,6 +150,22 @@ end
 
 
 function pd.update() 
+
+    -- Menu Scene
+    if currentScene == SCENE_MENU then
+        MenuScreen.update()
+        return
+    end
+
+    --Game Scene 
+
+    --Game Over Check 
+    if playerLives <= 0 then
+        switchToMenu()
+        return 
+    end
+
+
     spawnTimer -= 1
     if spawnTimer <= 0 then
         spawnEnemy()
@@ -130,7 +188,7 @@ function pd.update()
             table.remove(enemies,i) 
         end
     end
-    
+
     drawHearts()
     pd.drawFPS(0,220)
 end 
