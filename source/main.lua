@@ -30,6 +30,23 @@ local RIGHTLANE = 3
 local playerLane = 2
 local playerRange = 10
 
+
+--Health 
+local MAX_Lives = 3
+local playerLives = MAX_Lives
+local heartImage = gfx.image.new("images/heart.png")
+
+
+local function takeDamage() 
+    playerLives = math.max(0,playerLives - 1)
+end
+
+local function drawHearts() 
+    for i = 1, playerLives do 
+        heartImage:draw((i-1)*32, 0)
+    end
+end
+
 --Enemy Spawning
 local enemies = {}
 local spawnTimer = 150 -- 5 Seconds at 30 Hz
@@ -100,5 +117,20 @@ function pd.update()
 
     Enemy.setPlayerLane(playerLane)  -- push current lane into enemy module
     gfx.sprite.update()
-    pd.drawFPS(0,0)
+
+
+    --Clean up dead Enemies. Enemies that reached the end deal 1 damage.
+
+    for i = #enemies, 1, -1 do 
+        local e = enemies[i]
+        if e.dead then 
+            if e.reachedEnd then 
+                takeDamage()
+            end
+            table.remove(enemies,i) 
+        end
+    end
+    
+    drawHearts()
+    pd.drawFPS(0,220)
 end 

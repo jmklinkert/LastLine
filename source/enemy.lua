@@ -6,13 +6,11 @@ local gfx = playdate.graphics
 
 class("Enemy").extends(gfx.sprite)
 
+--imagetables, for if the enemy is on the same lane as the player, one to the right or two to the right
+--can be mirrored if the enemy is to the left of the player 
 local enemySame = gfx.imagetable.new("images/enemy_same")
 local enemyOne = gfx.imagetable.new("images/enemy_one")
 local enemyTwo = gfx.imagetable.new("images/enemy_two")
-
-print("same:", enemySame and enemySame:getLength())
-print("one:", enemyOne and enemyOne:getLength())
-print("two:", enemyTwo and enemyTwo:getLength())
 
 local currentPlayerLane = 1
 
@@ -39,6 +37,7 @@ function Enemy:update()
     self.progress += self.speed / 30
 
     if self.progress >= 1 then
+        self.reachedEnd = true --signals main.lua to deal damage
         self:remove()
         self.dead = true 
         return
