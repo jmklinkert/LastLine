@@ -170,15 +170,13 @@ function pd.AButtonDown()
     end
 
     if not Stamina.canPunch() then return end
-
     Stamina.drain()
 
     --In-Game: Punch behaviour 
     for i = #enemies, 1, -1 do
         local e = enemies[i]
         if e:canBeHit(playerLane, playerRange) then
-            e:remove()
-            table.remove(enemies, i)
+            e:startDissolve()
         end
     end
 end 
@@ -265,11 +263,11 @@ function pd.update()
                 if i ~= j
                 and not re.pushed
                 and not re.dead 
+                and not re.dissolving 
                 and re.lane == pe.lane 
                 and pe.progress <= re.progress
                 then 
-                    re.dead = true
-                    re:remove()
+                    re:startDissolve() 
                 end
             end
         end
