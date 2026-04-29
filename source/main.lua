@@ -7,6 +7,7 @@ import "CoreLibs/ui"
 import "enemy"
 import "menuScreen"
 import "stamina"
+import "fists"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -66,7 +67,7 @@ local WAVE_INTERVAL_START = 5 * 30   -- frames (5 s at 30 Hz)
 local WAVE_INTERVAL_MIN   = 3 * 30   -- frames (3 s at 30 Hz)
 local ENEMIES_START       = 2
 local ENEMIES_MAX         = 6
-local RAMP_EVERY          = 2        -- waves between each difficulty step
+local RAMP_EVERY          = 3        -- waves between each difficulty step
 local RAMP_STEPS          = 4        -- ramp 0..4
  
 -- Returns the ramp level (0–RAMP_STEPS) for a given completed-wave count
@@ -132,6 +133,7 @@ local function switchToGame()
 
     background:add()
     updateBg()
+    Fists.enter()
 
     currentScene = SCENE_GAME
 end
@@ -171,6 +173,7 @@ function pd.AButtonDown()
 
     if not Stamina.canPunch() then return end
     Stamina.drain()
+    Fists.punch()
 
     --In-Game: Punch behaviour 
     for i = #enemies, 1, -1 do
@@ -186,6 +189,7 @@ function pd.BButtonDown()
     if not Stamina.canSuperPunch() then return end 
 
     Stamina.drainBonus()
+    Fists.superPunch()
 
     for i = 1, #enemies do 
         local e = enemies[i]
@@ -249,6 +253,9 @@ function pd.update()
 
 
     Enemy.setPlayerLane(playerLane)  -- push current lane into enemy module
+
+
+    Fists.update()
     gfx.sprite.update()
 
 
