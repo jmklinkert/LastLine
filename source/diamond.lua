@@ -16,7 +16,7 @@ local sheets = {
 }
 
 -- ─── Timing ──────────────────────────────────────────────────────────────────
-local BLINK_PERIOD = 6   -- ticks per on/off cycle while the enemy is punchable
+local BLINK_PERIOD = 2   -- ticks per on/off cycle while the enemy is punchable
 
 -- ─── Sprite & state ──────────────────────────────────────────────────────────
 local sprite
@@ -29,6 +29,12 @@ local function ensureSprite()
         sprite:moveTo(0, 0)
         sprite:setSize(400, 240)
         sprite:setZIndex(45)      -- above enemies (1-39) and the death flash (40)
+        -- The diamond art is black-on-transparent. NXOR inverts whatever is
+        -- behind the marker's pixels (NOT(dest XOR 0) = NOT dest), so it stays
+        -- visible over both dark and light areas. (Plain XOR is a no-op on black
+        -- pixels, and Inverted just makes the diamond white.) Free draw flag, so
+        -- no separate inverted spritesheet is needed.
+        sprite:setImageDrawMode(gfx.kDrawModeNXOR)
         sprite:setVisible(false)
     end
 end
