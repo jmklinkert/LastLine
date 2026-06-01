@@ -8,6 +8,7 @@ import "enemy"
 import "menuScreen"
 import "fists"
 import "deathAnimation"
+import "diamond"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -189,6 +190,7 @@ local function switchToGame()
     updateBg()
     Fists.enter()
     DeathAnim.enter()
+    Diamond.enter()
 
     currentScene = SCENE_GAME
 end
@@ -276,8 +278,21 @@ local function spawnEnemy()
     table.insert(enemies, enemy)
 end
 
+-- The enemy nearest the player (highest progress), or nil if none are alive.
+local function leadingEnemy()
+    local lead, best = nil, -1
+    for i = 1, #enemies do
+        local e = enemies[i]
+        if not e.dead and e.progress > best then
+            best = e.progress
+            lead = e
+        end
+    end
+    return lead
+end
 
-function pd.update() 
+
+function pd.update()
 
     -- Menu Scene
     if currentScene == SCENE_MENU then
@@ -323,6 +338,10 @@ function pd.update()
 
     Enemy.setPlayerLane(playerLane)  -- push current lane into enemy module
 
+    -- Marker above the nearest enemy; blinks once that enemy is punchable
+    local lead = leadingEnemy()
+    local punchable = lead ~= nil and lead:canBeHit(playerLane, playerRange)
+    Diamond.update(lead, punchable)
 
     Fists.update()
     DeathAnim.update()

@@ -70,7 +70,14 @@ function Enemy:getImageParams()
         math.max(1, math.floor(self.progress * (self.frameCount - 1)) + 1),
         self.frameCount
     )
-    return tbl, flip, frame, offset 
+    return tbl, flip, frame, offset
+end
+
+-- For the diamond marker: which lane-offset sheet to use (0/1/2), how to flip,
+-- and which frame, so the diamond can mirror this enemy exactly.
+function Enemy:getMarkerParams()
+    local _, flip, frame, offset = self:getImageParams()
+    return math.abs(offset), flip, frame
 end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
