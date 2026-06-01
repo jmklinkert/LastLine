@@ -43,19 +43,36 @@ local SUPER_PUNCH_COOLDOWN = 2 * 30  -- frames (2 s at 30 Hz)
 local superPunchTimer = 0            -- frames until super-punch is ready again
 
 
---Health 
-local MAX_Lives = 3
-local playerLives = MAX_Lives
-local heartImage = gfx.image.new("images/heart.png")
+--Health
+local MAX_HEALTH = 100
+local playerHealth = MAX_HEALTH
 
+-- Health bar layout (drawn with gfx primitives; no sprite asset)
+local HEALTHBAR_X = 8
+local HEALTHBAR_Y = 8
+local HEALTHBAR_W = 120   -- outer width including border
+local HEALTHBAR_H = 14
+local HEALTHBAR_PAD = 2   -- gap between border and the fill
 
-local function takeDamage() 
-    playerLives = math.max(0,playerLives - 1)
+local function takeDamage(amount)
+    playerHealth = math.max(0, playerHealth - amount)
 end
 
-local function drawHearts() 
-    for i = 1, playerLives do 
-        heartImage:draw((i-1)*32, 0)
+local function drawHealthBar()
+    -- White backing so the bar reads on any background, then a black border
+    gfx.setColor(gfx.kColorWhite)
+    gfx.fillRect(HEALTHBAR_X, HEALTHBAR_Y, HEALTHBAR_W, HEALTHBAR_H)
+    gfx.setColor(gfx.kColorBlack)
+    gfx.drawRect(HEALTHBAR_X, HEALTHBAR_Y, HEALTHBAR_W, HEALTHBAR_H)
+
+    -- Filled portion proportional to remaining health
+    local innerW = HEALTHBAR_W - HEALTHBAR_PAD * 2
+    local fillW  = math.floor(innerW * (playerHealth / MAX_HEALTH))
+    if fillW > 0 then
+        gfx.fillRect(HEALTHBAR_X + HEALTHBAR_PAD,
+                     HEALTHBAR_Y + HEALTHBAR_PAD,
+                     fillW,
+                     HEALTHBAR_H - HEALTHBAR_PAD * 2)
     end
 end
 
@@ -129,7 +146,7 @@ local function switchToMenu()
 end
 
 local function switchToGame()
-    playerLives = MAX_Lives
+    playerHealth = MAX_HEALTH
     playerLane = MIDDLELANE
     spawnTimer = 150
     superPunchTimer = 0
@@ -243,10 +260,10 @@ function pd.update()
 
     --Game Scene 
 
-    --Game Over Check 
-    if playerLives <= 0 then
+    --Game Over Check
+    if playerHealth <= 0 then
         switchToMenu()
-        return 
+        return
     end
 
 
@@ -307,19 +324,19 @@ function pd.update()
     end
 
 
-    --Clean up dead Enemies. Enemies that reached the end deal 1 damage.
-    for i = #enemies, 1, -1 do 
+    --Clean up dead Enemies. Enemies that reached the end deal their damage.
+    for i = #enemies, 1, -1 do
         local e = enemies[i]
-        if e.dead then 
-            if e.reachedEnd then 
-                takeDamage()
+        if e.dead then
+            if e.reachedEnd then
+                takeDamage(e.damage)
             end
-            table.remove(enemies,i) 
+            table.remove(enemies,i)
         end
     end
     if superPunchTimer > 0 then
         superPunchTimer -= 1
     end
-    drawHearts()
+    drawHealthBar()
     pd.drawFPS(0,220)
 end 

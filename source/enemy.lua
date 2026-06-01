@@ -27,6 +27,7 @@ function Enemy:init(lane)
     self.speed = 1 / 5
     self.frameCount = 150
     self.pushed = false
+    self.damage = 20   -- damage dealt to the player on reaching the end
 
     self.currentImage = nil
     self.currentFlip = gfx.kImageUnflipped
