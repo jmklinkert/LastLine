@@ -6,7 +6,6 @@ import "CoreLibs/sprites"
 import "CoreLibs/ui"
 import "enemy"
 import "menuScreen"
-import "stamina"
 import "fists"
 
 -- Localizing commonly used globals
@@ -37,6 +36,10 @@ local RIGHTLANE = 3
 --Player
 local playerLane = 2
 local playerRange = 10
+
+--Super-Punch cooldown
+local SUPER_PUNCH_COOLDOWN = 2 * 30  -- frames (2 s at 30 Hz)
+local superPunchTimer = 0            -- frames until super-punch is ready again
 
 
 --Health 
@@ -128,7 +131,7 @@ local function switchToGame()
     playerLives = MAX_Lives
     playerLane = MIDDLELANE
     spawnTimer = 150
-    Stamina.reset()
+    superPunchTimer = 0
 
     -- Reset wave state; first wave arrives after a full interval
     waveCount  = 0
@@ -177,8 +180,6 @@ function pd.AButtonDown()
         return
     end
 
-    if not Stamina.canPunch() then return end
-    Stamina.drain()
     Fists.punch()
 
     --In-Game: Punch behaviour 
@@ -192,9 +193,9 @@ end
 
 function pd.BButtonDown()
     if currentScene ~= SCENE_GAME then return end
-    if not Stamina.canSuperPunch() then return end 
+    if superPunchTimer > 0 then return end
 
-    Stamina.drainBonus()
+    superPunchTimer = SUPER_PUNCH_COOLDOWN
     Fists.superPunch()
 
     for i = 1, #enemies do 
@@ -297,7 +298,9 @@ function pd.update()
             table.remove(enemies,i) 
         end
     end
-    Stamina.update()
+    if superPunchTimer > 0 then
+        superPunchTimer -= 1
+    end
     drawHearts()
     pd.drawFPS(0,220)
 end 
