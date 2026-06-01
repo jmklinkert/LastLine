@@ -76,6 +76,33 @@ local function drawHealthBar()
     end
 end
 
+-- Super-punch cooldown bar: small bar in the bottom-left over the left fist.
+-- Only shown while cooling down; drains from full to empty as it recharges.
+local SPBAR_X   = 50
+local SPBAR_H   = 8
+local SPBAR_W   = 64
+local SPBAR_Y   = 240 - SPBAR_H - 8   -- 8px up from the bottom edge
+local SPBAR_PAD = 2
+
+local function drawSuperCooldownBar()
+    if superPunchTimer <= 0 then return end   -- ready: nothing to show
+
+    gfx.setColor(gfx.kColorWhite)
+    gfx.fillRect(SPBAR_X, SPBAR_Y, SPBAR_W, SPBAR_H)
+    gfx.setColor(gfx.kColorBlack)
+    gfx.drawRect(SPBAR_X, SPBAR_Y, SPBAR_W, SPBAR_H)
+
+    -- Filled portion proportional to remaining cooldown
+    local innerW = SPBAR_W - SPBAR_PAD * 2
+    local fillW  = math.floor(innerW * (superPunchTimer / SUPER_PUNCH_COOLDOWN))
+    if fillW > 0 then
+        gfx.fillRect(SPBAR_X + SPBAR_PAD,
+                     SPBAR_Y + SPBAR_PAD,
+                     fillW,
+                     SPBAR_H - SPBAR_PAD * 2)
+    end
+end
+
 --Enemy Spawning
 local enemies = {}
 
@@ -338,5 +365,6 @@ function pd.update()
         superPunchTimer -= 1
     end
     drawHealthBar()
+    drawSuperCooldownBar()
     pd.drawFPS(0,220)
 end 
