@@ -14,6 +14,11 @@ local enemyTwo = gfx.imagetable.new("images/enemy_two")
 
 local currentPlayerLane = 1
 
+-- Depth ordering: enemies closer to the player (higher progress) draw in front.
+-- Kept below the death animation (z 40) and fists (z 50) so they stay foreground.
+local Z_MIN = 1
+local Z_MAX = 39
+
 function Enemy.setPlayerLane(lane)
     currentPlayerLane = lane
 end
@@ -36,7 +41,14 @@ function Enemy:init(lane)
     self:setCenter(0,0)
     self:moveTo(0,0)
     self:setSize(400,240)
-    self:add() 
+    self:updateDepth()
+    self:add()
+end
+
+-- Map progress (0 = far, 1 = at the player) onto the enemy z-index band so
+-- closer enemies always draw in front of further ones, regardless of spawn order.
+function Enemy:updateDepth()
+    self:setZIndex(Z_MIN + math.floor(self.progress * (Z_MAX - Z_MIN)))
 end
 
 -- ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -117,11 +129,14 @@ function Enemy:update()
         end
     end
 
+    -- ── Depth ──
+    self:updateDepth()
+
     -- ── Image ──
-    local tbl, flip, frame = self:getImageParams() 
+    local tbl, flip, frame = self:getImageParams()
     self.currentImage = tbl:getImage(frame)
-    self.currentFlip = flip 
-    self:markDirty() 
+    self.currentFlip = flip
+    self:markDirty()
 end
 
 
