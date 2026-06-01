@@ -14,8 +14,6 @@ local enemyTwo = gfx.imagetable.new("images/enemy_two")
 
 local currentPlayerLane = 1
 
-local DISSOLVE_FRAMES = 10
-
 function Enemy.setPlayerLane(lane)
     currentPlayerLane = lane
 end
@@ -29,18 +27,11 @@ function Enemy:init(lane)
     self.speed = 1 / 5
     self.frameCount = 150
     self.pushed = false
-    self.dissolving = false
-    self.dissolveAlpha = 1.0
-
 
     self.currentImage = nil
-    self.currentFlip = gfx.kImageUnflipped 
+    self.currentFlip = gfx.kImageUnflipped
 
-    self.bakedDissolveImage = nil
-    self.lastBakedOffset = nil
-
-
-    --full screen sprite 
+    --full screen sprite
     self:setCenter(0,0)
     self:moveTo(0,0)
     self:setSize(400,240)
@@ -69,30 +60,16 @@ function Enemy:getImageParams()
     return tbl, flip, frame, offset 
 end
 
-function Enemy:bakeDissolveImage() 
-    local tbl, flip, frame, offset = self:getImageParams()
-    local src = tbl:getImage(frame)
-    local w, h = src:getSize() 
-    
-    local baked = gfx.image.new(w,h,gfx.kColorClear)
-    gfx.pushContext(baked)
-    src:draw(0,0, flip)
-    gfx.popContext()
-
-    self.bakedDissolveImage = baked
-    self.lastBakedOffset = offset
-end
-
 -- ─── Public API ──────────────────────────────────────────────────────────────
- 
-function Enemy:startDissolve() 
-    self.dissolving = true
-    self.dissolveAlpha = 1.0
-    self:bakeDissolveImage() 
-    self:markDirty() 
+
+-- Remove the enemy immediately. The death animation (if any) is driven
+-- separately by the caller; the sprite itself just disappears.
+function Enemy:kill()
+    self.dead = true
+    self:remove()
 end
 
--- Triggered by Super Punch. Reverses enemy through the lane 
+-- Triggered by Super Punch. Reverses enemy through the lane
 function Enemy:push() 
     self.pushed = true 
 end
@@ -100,7 +77,6 @@ end
 
 function Enemy:canBeHit(playerLane, playerRange)
     if self.lane ~= playerLane then return false end
-    if self.dissolving then return false end 
 
     return self.progress >= (1-playerRange/100)
 end
@@ -108,38 +84,17 @@ end
 -- ─── Draw override ───────────────────────────────────────────────────────────
 -- We never call setImage (which would reset this callback), so this function
 -- is responsible for ALL visual output of the sprite.
-function Enemy:draw() 
-    if self.dissolving then 
-        if self.bakedDissolveImage then 
-            self.bakedDissolveImage:drawFaded(0,0, self.dissolveAlpha, gfx.image.kDitherTypeBayer8x8)
-        end 
-    elseif self.currentImage then 
+function Enemy:draw()
+    if self.currentImage then
         self.currentImage:draw(0,0, self.currentFlip)
-    end 
+    end
 end
 
 
 function Enemy:update()
 
-    -- ── Dissolving ──
-    if self.dissolving then 
-        self.dissolveAlpha -= 1.0 / DISSOLVE_FRAMES
-        if self.dissolveAlpha <= 0 then
-            self.dead = true 
-            self:remove() 
-            return 
-        end
-        -- Re-bake if the player changed lanes mid-dissolve
-        local _,_,_, offset = self:getImageParams()
-        if offset ~= self.lastBakedOffset then 
-            self:bakeDissolveImage()
-        end
-        self:markDirty()
-        return 
-    end
-
     -- ── Progress ──
-    if self.pushed then 
+    if self.pushed then
         --Move backwards at double speed 
         self.progress -= (self.speed*2)/30
 

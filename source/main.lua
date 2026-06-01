@@ -7,6 +7,7 @@ import "CoreLibs/ui"
 import "enemy"
 import "menuScreen"
 import "fists"
+import "deathAnimation"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -143,6 +144,7 @@ local function switchToGame()
     background:add()
     updateBg()
     Fists.enter()
+    DeathAnim.enter()
 
     currentScene = SCENE_GAME
 end
@@ -155,19 +157,28 @@ MenuScreen.enter()
  
 
 function pd.leftButtonDown()
+    local previousLane = playerLane
     if playerLane == RIGHTLANE then
         playerLane = MIDDLELANE
     elseif playerLane == MIDDLELANE then
         playerLane = LEFTLANE
     end
+    if playerLane ~= previousLane then
+        -- Perspective shifted; the baked death animation no longer lines up
+        DeathAnim.stop()
+    end
     updateBg()
 end
 
 function pd.rightButtonDown()
+    local previousLane = playerLane
     if playerLane == LEFTLANE then
         playerLane = MIDDLELANE
     elseif playerLane == MIDDLELANE then
         playerLane = RIGHTLANE
+    end
+    if playerLane ~= previousLane then
+        DeathAnim.stop()
     end
     updateBg()
 end
@@ -182,14 +193,21 @@ function pd.AButtonDown()
 
     Fists.punch()
 
-    --In-Game: Punch behaviour 
+    --In-Game: Punch behaviour
+    local hitSomething = false
     for i = #enemies, 1, -1 do
         local e = enemies[i]
         if e:canBeHit(playerLane, playerRange) then
-            e:startDissolve()
+            e:kill()
+            hitSomething = true
         end
     end
-end 
+
+    -- Play the death animation only when a normal punch actually connects
+    if hitSomething then
+        DeathAnim.play()
+    end
+end
 
 function pd.BButtonDown()
     if currentScene ~= SCENE_GAME then return end
@@ -263,6 +281,7 @@ function pd.update()
 
 
     Fists.update()
+    DeathAnim.update()
     gfx.sprite.update()
 
 
@@ -276,12 +295,12 @@ function pd.update()
                 local re = enemies[j]
                 if i ~= j
                 and not re.pushed
-                and not re.dead 
-                and not re.dissolving 
-                and re.lane == pe.lane 
+                and not re.dead
+                and re.lane == pe.lane
                 and pe.progress <= re.progress
-                then 
-                    re:startDissolve() 
+                then
+                    -- Killed by a pushed enemy: no death animation
+                    re:kill()
                 end
             end
         end
