@@ -57,7 +57,6 @@ end
 
 --Enemy Spawning
 local enemies = {}
-local spawnTimer = 150 -- 5 Seconds at 30 Hz
 
 
 
@@ -67,8 +66,10 @@ local WAVE_INTERVAL_START = 5 * 30   -- frames (5 s at 30 Hz)
 local WAVE_INTERVAL_MIN   = 3 * 30   -- frames (3 s at 30 Hz)
 local ENEMIES_START       = 2
 local ENEMIES_MAX         = 6
-local RAMP_EVERY          = 3        -- waves between each difficulty step
-local RAMP_STEPS          = 4        -- ramp 0..4
+local SPAWN_DELAY_START   = 20       -- frames between enemies in a wave at ramp 0
+local SPAWN_DELAY_MIN     = 12       -- frames between enemies in a wave at max ramp
+local RAMP_EVERY          = 4        -- waves between each difficulty step
+local RAMP_STEPS          = 8        -- ramp 0..4
  
 -- Returns the ramp level (0–RAMP_STEPS) for a given completed-wave count
 local function rampLevel(waveCount)
@@ -82,6 +83,11 @@ end
  
 local function enemiesPerWave(waveCount)
     return math.min(ENEMIES_MAX, ENEMIES_START + rampLevel(waveCount))
+end
+
+local function spawnInterval(waveCount)
+    return math.max(SPAWN_DELAY_MIN,
+                    SPAWN_DELAY_START - rampLevel(waveCount) * 2)
 end
  
 -- Wave state (reset in switchToGame)
@@ -233,8 +239,8 @@ function pd.update()
             spawnEnemy()
             spawnQueue -= 1
             if spawnQueue > 0 then
-                -- More enemies to come; wait some frames before the next one
-                spawnDelay = math.random(15, 18)
+                -- More enemies to come; wait the difficulty-scaled delay before the next one
+                spawnDelay = spawnInterval(waveCount)
             else
                 -- Wave fully spawned; increment counter and arm the next-wave timer
                 waveCount += 1
