@@ -38,7 +38,7 @@ local RIGHTLANE = 3
 
 --Player
 local playerLane = 2
-local playerRange = 10
+local playerRange = 15
 
 --Super-Punch cooldown
 local SUPER_PUNCH_COOLDOWN = 2 * 30  -- frames (2 s at 30 Hz)
@@ -170,10 +170,9 @@ local enemies = {}
 
 -- ─── Wave / Difficulty System ─────────────────────────────────────────────────
 --
-local WAVE_INTERVAL_START = 5 * 30   -- frames (5 s at 30 Hz)
-local WAVE_INTERVAL_MIN   = 3 * 30   -- frames (3 s at 30 Hz)
-local ENEMIES_START       = 2
-local ENEMIES_MAX         = 6
+local WAVE_CLEAR_DELAY     = math.floor(2.5 * 30)  -- frames; next wave starts 2.5s after the field is cleared
+local ENEMIES_START       = 4
+local ENEMIES_MAX         = 12
 local SPAWN_DELAY_START   = 20       -- frames between enemies in a wave at ramp 0
 local SPAWN_DELAY_MIN     = 12       -- frames between enemies in a wave at max ramp
 local RAMP_EVERY          = 4        -- waves between each difficulty step
@@ -182,11 +181,6 @@ local RAMP_STEPS          = 8        -- ramp 0..4
 -- Returns the ramp level (0–RAMP_STEPS) for a given completed-wave count
 local function rampLevel(waveCount)
     return math.min(RAMP_STEPS, math.floor(waveCount / RAMP_EVERY))
-end
- 
-local function waveInterval(waveCount)
-    return math.max(WAVE_INTERVAL_MIN,
-                    WAVE_INTERVAL_START - rampLevel(waveCount) * 15)
 end
  
 local function enemiesPerWave(waveCount)
@@ -238,9 +232,9 @@ local function switchToGame()
     spawnTimer = 150
     superPunchTimer = 0
 
-    -- Reset wave state; first wave arrives after a full interval
+    -- Reset wave state; first wave arrives after the clear delay
     waveCount  = 0
-    waveTimer  = waveInterval(0)
+    waveTimer  = WAVE_CLEAR_DELAY
     spawnQueue = 0
     spawnDelay = 0
     waveMsgTimer = 0
@@ -366,6 +360,18 @@ local function leadingEnemyOnLane(lane)
     return lead
 end
 
+-- True while any advancing enemy remains. Pushed enemies are retreating and are
+-- ignored, so a super-punch doesn't hold up the next wave's countdown.
+local function fieldHasActiveEnemies()
+    for i = 1, #enemies do
+        local e = enemies[i]
+        if not e.dead and not e.pushed then
+            return true
+        end
+    end
+    return false
+end
+
 
 function pd.update()
 
@@ -395,20 +401,27 @@ function pd.update()
                 -- More enemies to come; wait the difficulty-scaled delay before the next one
                 spawnDelay = spawnInterval(waveCount)
             else
-                -- Wave fully spawned; increment counter and arm the next-wave timer
+                -- Wave fully spawned; the next wave waits until the field clears
                 waveCount += 1
-                waveTimer  = waveInterval(waveCount)
+                waveTimer  = WAVE_CLEAR_DELAY
             end
         end
     else
-        -- Between waves: count down to the next wave
-        waveTimer -= 1
-        if waveTimer <= 0 then
-            -- Start a new wave; first enemy spawns immediately (spawnDelay = 0)
-            spawnQueue = enemiesPerWave(waveCount)
-            spawnDelay = 0
-            -- waveCount counts completed waves, so the one starting is waveCount + 1
-            showWaveMessage(waveCount + 1)
+        -- Between waves: only start the 2.5s countdown once every advancing enemy
+        -- from the last wave is gone (defeated or reached the end). Pushed enemies
+        -- are retreating and don't count. While any remain, keep the timer pinned
+        -- at full so it begins counting only after the field clears.
+        if fieldHasActiveEnemies() then
+            waveTimer = WAVE_CLEAR_DELAY
+        else
+            waveTimer -= 1
+            if waveTimer <= 0 then
+                -- Start a new wave; first enemy spawns immediately (spawnDelay = 0)
+                spawnQueue = enemiesPerWave(waveCount)
+                spawnDelay = 0
+                -- waveCount counts completed waves, so the one starting is waveCount + 1
+                showWaveMessage(waveCount + 1)
+            end
         end
     end
 
