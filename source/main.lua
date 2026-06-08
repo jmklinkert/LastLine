@@ -105,6 +105,64 @@ local function drawSuperCooldownBar()
     end
 end
 
+-- Wave banner: a little "Wave N" message that slides in from the top, holds,
+-- then fades out whenever a new wave starts.
+local WAVE_MSG_LIFE  = 90   -- frames the banner is shown (3 s at 30 Hz)
+local WAVE_MSG_Y     = 28   -- resting y once slid in
+local WAVE_MSG_SLIDE = 10   -- frames of slide-in
+local WAVE_MSG_FADE  = 20   -- frames of fade-out at the end
+local WAVE_MSG_PAD   = 6    -- padding inside the banner box
+
+local waveMsgImage = nil
+local waveMsgTimer = 0
+
+-- Bake the "Wave N" text into a small boxed image so it reads on any background
+-- and can be faded as one unit.
+local function bakeWaveMessage(n)
+    local text = "Wave " .. n
+    local tw, th = gfx.getTextSize(text)
+    local w, h = tw + WAVE_MSG_PAD * 2, th + WAVE_MSG_PAD * 2
+
+    local img = gfx.image.new(w, h)
+    gfx.pushContext(img)
+        gfx.setColor(gfx.kColorWhite)
+        gfx.fillRoundRect(0, 0, w, h, 4)
+        gfx.setColor(gfx.kColorBlack)
+        gfx.drawRoundRect(0, 0, w, h, 4)
+        gfx.drawText(text, WAVE_MSG_PAD, WAVE_MSG_PAD)
+    gfx.popContext()
+    return img
+end
+
+local function showWaveMessage(n)
+    waveMsgImage = bakeWaveMessage(n)
+    waveMsgTimer = WAVE_MSG_LIFE
+end
+
+local function drawWaveMessage()
+    if waveMsgTimer <= 0 or not waveMsgImage then return end
+
+    local imgW, imgH = waveMsgImage:getSize()
+    local x = (400 - imgW) // 2
+    local elapsed = WAVE_MSG_LIFE - waveMsgTimer
+
+    -- Slide down from above into the resting position
+    local y = WAVE_MSG_Y
+    if elapsed < WAVE_MSG_SLIDE then
+        local t = elapsed / WAVE_MSG_SLIDE
+        y = -imgH + (WAVE_MSG_Y + imgH) * t
+    end
+
+    -- Fade out over the final frames
+    local alpha = 1.0
+    if waveMsgTimer < WAVE_MSG_FADE then
+        alpha = waveMsgTimer / WAVE_MSG_FADE
+    end
+
+    waveMsgImage:drawFaded(x, math.floor(y), alpha, gfx.image.kDitherTypeBayer8x8)
+    waveMsgTimer -= 1
+end
+
 --Enemy Spawning
 local enemies = {}
 
@@ -185,6 +243,8 @@ local function switchToGame()
     waveTimer  = waveInterval(0)
     spawnQueue = 0
     spawnDelay = 0
+    waveMsgTimer = 0
+    waveMsgImage = nil
 
 
     background:add()
@@ -347,6 +407,8 @@ function pd.update()
             -- Start a new wave; first enemy spawns immediately (spawnDelay = 0)
             spawnQueue = enemiesPerWave(waveCount)
             spawnDelay = 0
+            -- waveCount counts completed waves, so the one starting is waveCount + 1
+            showWaveMessage(waveCount + 1)
         end
     end
 
@@ -406,5 +468,6 @@ function pd.update()
     end
     drawHealthBar()
     drawSuperCooldownBar()
+    drawWaveMessage()
     pd.drawFPS(0,220)
 end 
