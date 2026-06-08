@@ -81,10 +81,10 @@ end
 -- Super-punch cooldown bar: small bar in the bottom-left over the left fist.
 -- Only shown while cooling down; drains from full to empty as it recharges.
 local SPBAR_X   = 50
-local SPBAR_H   = 8
-local SPBAR_W   = 64
+local SPBAR_H   = 16
+local SPBAR_W   = 120
 local SPBAR_Y   = 240 - SPBAR_H - 8   -- 8px up from the bottom edge
-local SPBAR_PAD = 2
+local SPBAR_PAD = 3
 
 local function drawSuperCooldownBar()
     if superPunchTimer <= 0 then return end   -- ready: nothing to show
