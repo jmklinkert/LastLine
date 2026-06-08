@@ -9,6 +9,7 @@ import "menuScreen"
 import "fists"
 import "deathAnimation"
 import "diamond"
+import "crosshair"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -191,6 +192,7 @@ local function switchToGame()
     Fists.enter()
     DeathAnim.enter()
     Diamond.enter()
+    Crosshair.enter()
 
     currentScene = SCENE_GAME
 end
@@ -291,6 +293,19 @@ local function leadingEnemy()
     return lead
 end
 
+-- The nearest enemy on a specific lane (highest progress), or nil if none.
+local function leadingEnemyOnLane(lane)
+    local lead, best = nil, -1
+    for i = 1, #enemies do
+        local e = enemies[i]
+        if not e.dead and e.lane == lane and e.progress > best then
+            best = e.progress
+            lead = e
+        end
+    end
+    return lead
+end
+
 
 function pd.update()
 
@@ -342,6 +357,12 @@ function pd.update()
     local lead = leadingEnemy()
     local punchable = lead ~= nil and lead:canBeHit(playerLane, playerRange)
     Diamond.update(lead, punchable)
+
+    -- Crosshair tracks the nearest enemy on the *current* lane: arrows close in as
+    -- it approaches, and the punchable reticle replaces it once it's in range.
+    local laneLead = leadingEnemyOnLane(playerLane)
+    local lanePunchable = laneLead ~= nil and laneLead:canBeHit(playerLane, playerRange)
+    Crosshair.update(laneLead, lanePunchable, 1 - playerRange / 100)
 
     Fists.update()
     DeathAnim.update()
