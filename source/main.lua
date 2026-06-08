@@ -171,7 +171,7 @@ local enemies = {}
 -- ─── Wave / Difficulty System ─────────────────────────────────────────────────
 --
 local WAVE_CLEAR_DELAY     = math.floor(2.5 * 30)  -- frames; next wave starts 2.5s after the field is cleared
-local ENEMIES_START       = 4
+local ENEMIES_START       = 3
 local ENEMIES_MAX         = 12
 local SPAWN_DELAY_START   = 20       -- frames between enemies in a wave at ramp 0
 local SPAWN_DELAY_MIN     = 12       -- frames between enemies in a wave at max ramp
