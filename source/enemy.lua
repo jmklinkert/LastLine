@@ -7,16 +7,27 @@ local gfx = playdate.graphics
 class("Enemy").extends(gfx.sprite)
 
 --imagetables, for if the enemy is on the same lane as the player, one to the right or two to the right
---can be mirrored if the enemy is to the left of the player 
+--can be mirrored if the enemy is to the left of the player
 local enemySame = gfx.imagetable.new("images/enemy_same")
 local enemyOne = gfx.imagetable.new("images/enemy_one")
 local enemyTwo = gfx.imagetable.new("images/enemy_two")
+
+-- Parallel shadow sheets, indexed by absolute lane offset, frame-matched to the
+-- enemy sheets above so a shadow can mirror its enemy's exact frame and flip.
+local shadowTables = {
+    [0] = gfx.imagetable.new("images/shadow_same"),
+    [1] = gfx.imagetable.new("images/shadow_one"),
+    [2] = gfx.imagetable.new("images/shadow_two"),
+}
 
 local currentPlayerLane = 1
 
 -- Depth ordering: enemies closer to the player (higher progress) draw in front.
 -- Kept below the death animation (z 40) and fists (z 50) so they stay foreground.
-local Z_MIN = 1
+-- Shadows sit on a single flat layer (SHADOW_Z) beneath the whole enemy band, so
+-- a shadow can never be drawn over any enemy.
+local SHADOW_Z = 1
+local Z_MIN = 2
 local Z_MAX = 39
 
 function Enemy.setPlayerLane(lane)
@@ -43,6 +54,22 @@ function Enemy:init(lane)
     self:setSize(400,240)
     self:updateDepth()
     self:add()
+
+    -- Companion shadow sprite, drawn on the flat SHADOW_Z layer beneath all enemies
+    self.shadow = gfx.sprite.new()
+    self.shadow:setCenter(0,0)
+    self.shadow:moveTo(0,0)
+    self.shadow:setSize(400,240)
+    self.shadow:setZIndex(SHADOW_Z)
+    self:refreshShadow()
+    self.shadow:add()
+end
+
+-- Point the shadow sprite at the shadow frame matching this enemy's current
+-- frame/flip/lane-offset, so it tracks the enemy exactly.
+function Enemy:refreshShadow()
+    local _, flip, frame, offset = self:getImageParams()
+    self.shadow:setImage(shadowTables[math.abs(offset)]:getImage(frame), flip)
 end
 
 -- Map progress (0 = far, 1 = at the player) onto the enemy z-index band so
@@ -81,6 +108,17 @@ function Enemy:getMarkerParams()
 end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
+
+-- Removing the enemy also disposes of its shadow. Every death path (kill,
+-- reached-end, pushed off the lane) routes through here, so the shadow can
+-- never outlive its enemy.
+function Enemy:remove()
+    if self.shadow then
+        self.shadow:remove()
+        self.shadow = nil
+    end
+    Enemy.super.remove(self)
+end
 
 -- Remove the enemy immediately. The death animation (if any) is driven
 -- separately by the caller; the sprite itself just disappears.
@@ -143,6 +181,7 @@ function Enemy:update()
     local tbl, flip, frame = self:getImageParams()
     self.currentImage = tbl:getImage(frame)
     self.currentFlip = flip
+    self:refreshShadow()
     self:markDirty()
 end
 
