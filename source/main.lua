@@ -242,6 +242,11 @@ local function lasersPerWave(waveCount)
     return math.min(LASERS_MAX, math.floor(rampLevel(waveCount) / 2))
 end
 
+-- A gate's own lane stays closed to new spawns until the gate has advanced past
+-- this progress, guaranteeing a gap behind it big enough to maneuver around.
+-- Other lanes are unaffected, so the overall spawn cadence is unchanged.
+local GATE_SPAWN_BLOCK = 0.15
+
 -- Health boosters: each wave has at most one, with the chance climbing linearly
 -- from HEALTH_CHANCE_MIN% on wave 1 to HEALTH_CHANCE_MAX% on HEALTH_CHANCE_WAVE_CAP.
 local HEALTH_CHANCE_MIN      = 5
@@ -404,38 +409,43 @@ function pd.AButtonDown()
 
     Fists.punch()
 
-    -- The frontmost gate within reach on the player's lane (if any). It blocks the
-    -- punch from reaching anything behind it and hurts the player when struck.
-    local blockingLaser = frontmostLaserInRange()
+    --In-Game: Punch behaviour. A punch only connects with the single frontmost
+    --object in range on the player's lane (closest = highest progress), whatever
+    --its type. Anything behind it is untouched: enemies behind the first enemy
+    --survive, a health booster behind an enemy isn't destroyed, and a gate behind
+    --an enemy doesn't hurt the player.
+    local rangeThreshold = 1 - playerRange / 100
+    local target, targetKind, targetProgress = nil, nil, -1
 
-    --In-Game: Punch behaviour
-    local hitSomething = false
-    for i = #enemies, 1, -1 do
+    for i = 1, #enemies do
         local e = enemies[i]
-        if e:canBeHit(playerLane, playerRange)
-        and not (blockingLaser and blockingLaser.progress > e.progress) then
-            e:kill()
-            hitSomething = true
+        if not e.dead and e.lane == playerLane
+        and e.progress >= rangeThreshold and e.progress > targetProgress then
+            target, targetKind, targetProgress = e, "enemy", e.progress
         end
     end
-
-    -- Punching a gate hurts the player; the gate itself is indestructible.
-    if blockingLaser then
-        takeDamage(blockingLaser.damage)
+    for i = 1, #lasers do
+        local l = lasers[i]
+        if not l.dead and l.lane == playerLane
+        and l.progress >= rangeThreshold and l.progress > targetProgress then
+            target, targetKind, targetProgress = l, "laser", l.progress
+        end
     end
-
-    -- Punching a health booster destroys it without collecting (also blocked by a gate).
-    for i = #healths, 1, -1 do
+    for i = 1, #healths do
         local h = healths[i]
-        if h:inRange(playerLane, playerRange)
-        and not (blockingLaser and blockingLaser.progress > h.progress) then
-            h:kill()
+        if not h.dead and h.lane == playerLane
+        and h.progress >= rangeThreshold and h.progress > targetProgress then
+            target, targetKind, targetProgress = h, "health", h.progress
         end
     end
 
-    -- Play the death animation only when a normal punch actually connects with an enemy
-    if hitSomething then
-        DeathAnim.play()
+    if targetKind == "enemy" then
+        target:kill()
+        DeathAnim.play()          -- death animation only on an actual enemy hit
+    elseif targetKind == "health" then
+        target:kill()             -- destroyed without collecting
+    elseif targetKind == "laser" then
+        takeDamage(target.damage) -- gate is indestructible; the player gets hurt
     end
 end
 
@@ -459,19 +469,40 @@ function pd.BButtonDown()
 end
 
 -- ─── Update loop ────────────────────────────────────────────────────────────
- 
+
+-- A lane is off-limits for new spawns while it still has a gate close to the
+-- spawn point, so nothing lands right behind a gate on its own lane.
+local function laneBlockedByGate(lane)
+    for i = 1, #lasers do
+        local l = lasers[i]
+        if not l.dead and l.lane == lane and l.progress < GATE_SPAWN_BLOCK then
+            return true
+        end
+    end
+    return false
+end
+
+-- Pick a random lane (1–3) that isn't blocked by a freshly-spawned gate. If every
+-- lane is blocked (unlikely), fall back to any lane rather than skipping the spawn.
+local function pickSpawnLane()
+    local free = {}
+    for lane = 1, 3 do
+        if not laneBlockedByGate(lane) then free[#free+1] = lane end
+    end
+    if #free == 0 then return math.random(1, 3) end
+    return free[math.random(#free)]
+end
+
 local function spawnEnemy()
-    local enemyLane = math.random(1, 3) -- use 1–3 to match your LEFTLANE/MIDDLELANE/RIGHTLANE constants
-    local enemy = Enemy(enemyLane)
-    table.insert(enemies, enemy)
+    table.insert(enemies, Enemy(pickSpawnLane()))
 end
 
 local function spawnLaser()
-    table.insert(lasers, Laser(math.random(1, 3)))
+    table.insert(lasers, Laser(pickSpawnLane()))
 end
 
 local function spawnHealth()
-    table.insert(healths, Health(math.random(1, 3)))
+    table.insert(healths, Health(pickSpawnLane()))
 end
 
 -- The enemy nearest the player (highest progress), or nil if none are alive.
@@ -542,8 +573,8 @@ function pd.update()
 
     -- Wave spawning logic
     if #spawnQueue > 0 then
-        -- Mid-wave: count down to the next entity in the burst. Enemies, gates and
-        -- boosters all use the same delay, so nothing ever spawns right behind a gate.
+        -- Mid-wave: count down to the next entity in the burst. Every entity uses
+        -- the same delay; gates additionally keep their own lane clear (see spawn lane pick).
         spawnDelay -= 1
         if spawnDelay <= 0 then
             local what = table.remove(spawnQueue, 1)
