@@ -58,15 +58,48 @@ local HEALTHBAR_W = 120   -- outer width including border
 local HEALTHBAR_H = 14
 local HEALTHBAR_PAD = 2   -- gap between border and the fill
 
+-- Damage feedback: a short screen shake (whole-display offset) that decays out.
+local SHAKE_DURATION  = 12   -- frames the shake lasts (~0.4 s at 30 Hz)
+local SHAKE_MAGNITUDE = 5    -- max pixel displacement, strongest at the start
+local shakeTimer = 0         -- frames of shake remaining
+
+-- Heal feedback: the health bar blinks a few times.
+local FLICKER_DURATION = 24  -- frames the flicker lasts (~0.8 s)
+local FLICKER_PERIOD   = 4   -- frames per on/off cycle (so a few blinks total)
+local healthFlickerTimer = 0 -- frames of flicker remaining
+
 local function takeDamage(amount)
     playerHealth = math.max(0, playerHealth - amount)
+    shakeTimer = SHAKE_DURATION
 end
 
 local function heal(amount)
     playerHealth = math.min(MAX_HEALTH, playerHealth + amount)
+    healthFlickerTimer = FLICKER_DURATION
+end
+
+-- Apply the current frame's shake offset to the whole display, decaying the
+-- magnitude as the timer runs down and snapping back to centre when it ends.
+local function applyScreenShake()
+    if shakeTimer <= 0 then return end
+    shakeTimer -= 1
+    if shakeTimer <= 0 then
+        pd.display.setOffset(0, 0)
+        return
+    end
+    local mag = math.ceil(SHAKE_MAGNITUDE * (shakeTimer / SHAKE_DURATION))
+    pd.display.setOffset(math.random(-mag, mag), math.random(-mag, mag))
 end
 
 local function drawHealthBar()
+    -- Heal flicker: blink the whole bar off during the "off" half of each cycle.
+    if healthFlickerTimer > 0 then
+        healthFlickerTimer -= 1
+        if (healthFlickerTimer // FLICKER_PERIOD) % 2 == 1 then
+            return
+        end
+    end
+
     -- White backing so the bar reads on any background, then a black border
     gfx.setColor(gfx.kColorWhite)
     gfx.fillRect(HEALTHBAR_X, HEALTHBAR_Y, HEALTHBAR_W, HEALTHBAR_H)
@@ -269,6 +302,9 @@ local function switchToMenu()
     enemies = {}
     lasers  = {}
     healths = {}
+    -- Clear any leftover shake so the menu isn't drawn off-centre
+    shakeTimer = 0
+    pd.display.setOffset(0, 0)
     currentScene = SCENE_MENU
     MenuScreen.enter()
 end
@@ -278,6 +314,11 @@ local function switchToGame()
     playerLane = MIDDLELANE
     spawnTimer = 150
     superPunchTimer = 0
+
+    -- Reset damage/heal feedback state
+    shakeTimer = 0
+    healthFlickerTimer = 0
+    pd.display.setOffset(0, 0)
 
     -- Clear any field entities left from a previous run
     enemies = {}
@@ -494,6 +535,9 @@ function pd.update()
         switchToMenu()
         return
     end
+
+    -- Damage feedback: offset the whole display for this frame while shaking
+    applyScreenShake()
 
 
     -- Wave spawning logic
