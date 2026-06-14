@@ -5,6 +5,8 @@ import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "CoreLibs/ui"
 import "enemy"
+import "laser"
+import "health"
 import "menuScreen"
 import "fists"
 import "deathAnimation"
@@ -58,6 +60,10 @@ local HEALTHBAR_PAD = 2   -- gap between border and the fill
 
 local function takeDamage(amount)
     playerHealth = math.max(0, playerHealth - amount)
+end
+
+local function heal(amount)
+    playerHealth = math.min(MAX_HEALTH, playerHealth + amount)
 end
 
 local function drawHealthBar()
@@ -163,8 +169,13 @@ local function drawWaveMessage()
     waveMsgTimer -= 1
 end
 
---Enemy Spawning
+--Field entities. Enemies are hazards that can be punched/pushed; laser gates are
+--hazards that can't be removed and block punches; health boosters are boons.
 local enemies = {}
+local lasers  = {}
+local healths = {}
+
+local HEALTH_HEAL = math.floor(MAX_HEALTH * 0.2)  -- a booster restores 40% of max
 
 
 
@@ -191,12 +202,48 @@ local function spawnInterval(waveCount)
     return math.max(SPAWN_DELAY_MIN,
                     SPAWN_DELAY_START - rampLevel(waveCount) * 2)
 end
- 
+
+-- Laser gates: none in the early waves, climbing with the difficulty ramp.
+local LASERS_MAX = 3
+local function lasersPerWave(waveCount)
+    return math.min(LASERS_MAX, math.floor(rampLevel(waveCount) / 2))
+end
+
+-- Health boosters: each wave has at most one, with the chance climbing linearly
+-- from HEALTH_CHANCE_MIN% on wave 1 to HEALTH_CHANCE_MAX% on HEALTH_CHANCE_WAVE_CAP.
+local HEALTH_CHANCE_MIN      = 5
+local HEALTH_CHANCE_MAX      = 85
+local HEALTH_CHANCE_WAVE_CAP = 32
+local function healthChance(wave)
+    local t = math.min(1, (wave - 1) / (HEALTH_CHANCE_WAVE_CAP - 1))
+    return HEALTH_CHANCE_MIN + (HEALTH_CHANCE_MAX - HEALTH_CHANCE_MIN) * t
+end
+
+-- Build the ordered spawn list for the wave starting after `waveCount` completed
+-- waves: enemies plus any gates and an optional booster, shuffled so hazards and
+-- boons are sprinkled throughout. Every entry shares the enemy spawn delay, so
+-- nothing ever spawns right on top of a gate.
+local function buildSpawnQueue(waveCount)
+    local q = {}
+    for _ = 1, enemiesPerWave(waveCount) do q[#q+1] = "enemy" end
+    for _ = 1, lasersPerWave(waveCount) do q[#q+1] = "laser" end
+    if math.random(100) <= healthChance(waveCount + 1) then
+        q[#q+1] = "health"
+    end
+
+    -- Fisher–Yates shuffle
+    for i = #q, 2, -1 do
+        local j = math.random(i)
+        q[i], q[j] = q[j], q[i]
+    end
+    return q
+end
+
 -- Wave state (reset in switchToGame)
-local waveCount  = 0   -- fully-spawned waves so far
-local waveTimer  = 0   -- frames until the next wave begins
-local spawnQueue = 0   -- enemies still to be spawned in the current wave
-local spawnDelay = 0   -- frames until the next queued enemy is spawned
+local waveCount  = 0    -- fully-spawned waves so far
+local waveTimer  = 0    -- frames until the next wave begins
+local spawnQueue = {}   -- ordered list of "enemy"/"laser"/"health" left to spawn this wave
+local spawnDelay = 0    -- frames until the next queued entity is spawned
 
 
 
@@ -216,14 +263,14 @@ local function updateBg()
 end
 
 
-local function switchToMenu() 
-    --Remove all enemies
-    for i = #enemies, 1, -1 do
-        enemies[i]:remove() 
-        table.remove(enemies,i) 
-    end
+local function switchToMenu()
+    -- MenuScreen.enter() calls gfx.sprite.removeAll(), so the sprites are torn
+    -- down there; here we just drop our references to every field entity.
+    enemies = {}
+    lasers  = {}
+    healths = {}
     currentScene = SCENE_MENU
-    MenuScreen.enter()    
+    MenuScreen.enter()
 end
 
 local function switchToGame()
@@ -232,10 +279,15 @@ local function switchToGame()
     spawnTimer = 150
     superPunchTimer = 0
 
+    -- Clear any field entities left from a previous run
+    enemies = {}
+    lasers  = {}
+    healths = {}
+
     -- Reset wave state; first wave arrives after the clear delay
     waveCount  = 0
     waveTimer  = WAVE_CLEAR_DELAY
-    spawnQueue = 0
+    spawnQueue = {}
     spawnDelay = 0
     waveMsgTimer = 0
     waveMsgImage = nil
@@ -256,7 +308,23 @@ end
 MenuScreen.enter()
 
 -- ─── Input ──────────────────────────────────────────────────────────────────
- 
+
+-- The laser gate nearest the player (highest progress) that is on the player's
+-- lane and within punching reach, or nil. A punch/super-punch can't pass it: it
+-- shields anything behind it, and a regular punch into it hurts the player.
+local function frontmostLaserInRange()
+    local front = nil
+    for i = 1, #lasers do
+        local l = lasers[i]
+        if not l.dead and l:inRange(playerLane, playerRange) then
+            if not front or l.progress > front.progress then
+                front = l
+            end
+        end
+    end
+    return front
+end
+
 
 function pd.leftButtonDown()
     local previousLane = playerLane
@@ -295,17 +363,36 @@ function pd.AButtonDown()
 
     Fists.punch()
 
+    -- The frontmost gate within reach on the player's lane (if any). It blocks the
+    -- punch from reaching anything behind it and hurts the player when struck.
+    local blockingLaser = frontmostLaserInRange()
+
     --In-Game: Punch behaviour
     local hitSomething = false
     for i = #enemies, 1, -1 do
         local e = enemies[i]
-        if e:canBeHit(playerLane, playerRange) then
+        if e:canBeHit(playerLane, playerRange)
+        and not (blockingLaser and blockingLaser.progress > e.progress) then
             e:kill()
             hitSomething = true
         end
     end
 
-    -- Play the death animation only when a normal punch actually connects
+    -- Punching a gate hurts the player; the gate itself is indestructible.
+    if blockingLaser then
+        takeDamage(blockingLaser.damage)
+    end
+
+    -- Punching a health booster destroys it without collecting (also blocked by a gate).
+    for i = #healths, 1, -1 do
+        local h = healths[i]
+        if h:inRange(playerLane, playerRange)
+        and not (blockingLaser and blockingLaser.progress > h.progress) then
+            h:kill()
+        end
+    end
+
+    -- Play the death animation only when a normal punch actually connects with an enemy
     if hitSomething then
         DeathAnim.play()
     end
@@ -318,9 +405,13 @@ function pd.BButtonDown()
     superPunchTimer = SUPER_PUNCH_COOLDOWN
     Fists.superPunch()
 
-    for i = 1, #enemies do 
+    -- A gate blocks the push too (enemies behind it are safe), but costs no health.
+    local blockingLaser = frontmostLaserInRange()
+
+    for i = 1, #enemies do
         local e = enemies[i]
-        if not e.dead and e:canBeHit(playerLane, playerRange) then 
+        if not e.dead and e:canBeHit(playerLane, playerRange)
+        and not (blockingLaser and blockingLaser.progress > e.progress) then
             e:push()
         end
     end
@@ -328,10 +419,18 @@ end
 
 -- ─── Update loop ────────────────────────────────────────────────────────────
  
-local function spawnEnemy() 
+local function spawnEnemy()
     local enemyLane = math.random(1, 3) -- use 1–3 to match your LEFTLANE/MIDDLELANE/RIGHTLANE constants
     local enemy = Enemy(enemyLane)
     table.insert(enemies, enemy)
+end
+
+local function spawnLaser()
+    table.insert(lasers, Laser(math.random(1, 3)))
+end
+
+local function spawnHealth()
+    table.insert(healths, Health(math.random(1, 3)))
 end
 
 -- The enemy nearest the player (highest progress), or nil if none are alive.
@@ -360,12 +459,19 @@ local function leadingEnemyOnLane(lane)
     return lead
 end
 
--- True while any advancing enemy remains. Pushed enemies are retreating and are
--- ignored, so a super-punch doesn't hold up the next wave's countdown.
-local function fieldHasActiveEnemies()
+-- True while any advancing hazard remains. Pushed enemies are retreating and are
+-- ignored, so a super-punch doesn't hold up the next wave's countdown. Laser gates
+-- always count until they clear the lane, since they can't be removed. Health
+-- boosters are boons and never delay the next wave.
+local function fieldHasActiveHazards()
     for i = 1, #enemies do
         local e = enemies[i]
         if not e.dead and not e.pushed then
+            return true
+        end
+    end
+    for i = 1, #lasers do
+        if not lasers[i].dead then
             return true
         end
     end
@@ -391,14 +497,22 @@ function pd.update()
 
 
     -- Wave spawning logic
-    if spawnQueue > 0 then
-        -- Mid-wave: count down to the next enemy in the burst
+    if #spawnQueue > 0 then
+        -- Mid-wave: count down to the next entity in the burst. Enemies, gates and
+        -- boosters all use the same delay, so nothing ever spawns right behind a gate.
         spawnDelay -= 1
         if spawnDelay <= 0 then
-            spawnEnemy()
-            spawnQueue -= 1
-            if spawnQueue > 0 then
-                -- More enemies to come; wait the difficulty-scaled delay before the next one
+            local what = table.remove(spawnQueue, 1)
+            if what == "enemy" then
+                spawnEnemy()
+            elseif what == "laser" then
+                spawnLaser()
+            elseif what == "health" then
+                spawnHealth()
+            end
+
+            if #spawnQueue > 0 then
+                -- More to come; wait the difficulty-scaled delay before the next one
                 spawnDelay = spawnInterval(waveCount)
             else
                 -- Wave fully spawned; the next wave waits until the field clears
@@ -407,17 +521,17 @@ function pd.update()
             end
         end
     else
-        -- Between waves: only start the 2.5s countdown once every advancing enemy
-        -- from the last wave is gone (defeated or reached the end). Pushed enemies
-        -- are retreating and don't count. While any remain, keep the timer pinned
-        -- at full so it begins counting only after the field clears.
-        if fieldHasActiveEnemies() then
+        -- Between waves: only start the 2.5s countdown once every advancing hazard
+        -- from the last wave is gone (defeated, reached the end, or—for gates—cleared
+        -- the lane). Pushed enemies are retreating and don't count. While any remain,
+        -- keep the timer pinned at full so it begins counting only after the field clears.
+        if fieldHasActiveHazards() then
             waveTimer = WAVE_CLEAR_DELAY
         else
             waveTimer -= 1
             if waveTimer <= 0 then
-                -- Start a new wave; first enemy spawns immediately (spawnDelay = 0)
-                spawnQueue = enemiesPerWave(waveCount)
+                -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
+                spawnQueue = buildSpawnQueue(waveCount)
                 spawnDelay = 0
                 -- waveCount counts completed waves, so the one starting is waveCount + 1
                 showWaveMessage(waveCount + 1)
@@ -426,7 +540,11 @@ function pd.update()
     end
 
 
-    Enemy.setPlayerLane(playerLane)  -- push current lane into enemy module
+    -- Push the current lane into every entity module so they pick the right
+    -- lane-offset sheet and flip this frame.
+    Enemy.setPlayerLane(playerLane)
+    Laser.setPlayerLane(playerLane)
+    Health.setPlayerLane(playerLane)
 
     -- Marker above the nearest enemy; blinks once that enemy is punchable
     local lead = leadingEnemy()
@@ -466,6 +584,36 @@ function pd.update()
     end
 
 
+    --Pushed-Enemy / Gate Collision: a retreating enemy shoved back into a gate is
+    --destroyed without passing through; the gate is unharmed. (Only enemies in front
+    --of a gate ever get pushed, so a non-dead pushed enemy reaching the gate's
+    --progress means it has just hit it.)
+    for i = 1, #enemies do
+        local pe = enemies[i]
+        if pe.pushed and not pe.dead then
+            for j = 1, #lasers do
+                local l = lasers[j]
+                if not l.dead and l.lane == pe.lane and pe.progress <= l.progress then
+                    pe:kill()
+                    break
+                end
+            end
+        end
+    end
+
+
+    --Passive Health pickup: collected when on the player's lane within heal range.
+    --Pushing an enemy through a booster never affects it, so it's only ever removed
+    --here (collected) or by a punch / reaching the end.
+    for i = #healths, 1, -1 do
+        local h = healths[i]
+        if not h.dead and h:canCollect(playerLane) then
+            heal(HEALTH_HEAL)
+            h:kill()
+        end
+    end
+
+
     --Clean up dead Enemies. Enemies that reached the end deal their damage.
     for i = #enemies, 1, -1 do
         local e = enemies[i]
@@ -476,6 +624,25 @@ function pd.update()
             table.remove(enemies,i)
         end
     end
+
+    --Clean up gates. A gate reaching the end only hurts the player if they share its lane.
+    for i = #lasers, 1, -1 do
+        local l = lasers[i]
+        if l.dead then
+            if l.reachedEnd and l.lane == playerLane then
+                takeDamage(l.damage)
+            end
+            table.remove(lasers, i)
+        end
+    end
+
+    --Clean up boosters (collected, punched, or drifted past the end).
+    for i = #healths, 1, -1 do
+        if healths[i].dead then
+            table.remove(healths, i)
+        end
+    end
+
     if superPunchTimer > 0 then
         superPunchTimer -= 1
     end
