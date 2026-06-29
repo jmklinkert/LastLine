@@ -12,10 +12,15 @@ import "fists"
 import "deathAnimation"
 import "diamond"
 import "crosshair"
+import "sounds"
 
 -- Localizing commonly used globals
 local pd = playdate
 local gfx = playdate.graphics
+
+-- Pre-build sound effects so the first playback doesn't hitch.
+Sounds.load("taking_damage")
+Sounds.load("healing")
 
 
 --Scenes
@@ -71,11 +76,13 @@ local healthFlickerTimer = 0 -- frames of flicker remaining
 local function takeDamage(amount)
     playerHealth = math.max(0, playerHealth - amount)
     shakeTimer = SHAKE_DURATION
+    Sounds.play("taking_damage")
 end
 
 local function heal(amount)
     playerHealth = math.min(MAX_HEALTH, playerHealth + amount)
     healthFlickerTimer = FLICKER_DURATION
+    Sounds.play("healing")
 end
 
 -- Apply the current frame's shake offset to the whole display, decaying the
