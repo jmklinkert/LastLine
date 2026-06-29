@@ -14,6 +14,8 @@ import "diamond"
 import "crosshair"
 import "sounds"
 import "gameOver"
+import "score"
+import "scoreboard"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -28,7 +30,21 @@ Sounds.load("healing")
 local SCENE_MENU = "menu"
 local SCENE_GAME = "game"
 local SCENE_GAMEOVER = "gameover"
+local SCENE_SCOREBOARD = "scoreboard"
 local currentScene = SCENE_MENU
+
+-- Scoring point values
+local WAVE_CLEAR_POINTS = 300   -- awarded for clearing all hazards of a wave
+local HEALTH_POINTS     = 200   -- awarded for collecting a health booster
+local DAMAGE_PENALTY    = 200   -- lost on each instance of taking damage
+local CHAIN_STEP        = 50    -- chain-kill bonus, growing by this per kill by a pushed enemy
+
+-- The current run's reached wave, stamped onto the leaderboard entry at death.
+local currentWave = 0
+
+-- Result of the run just finished, stashed at death so the scoreboard can show it
+-- when the player advances past the game-over screen.
+local finalEntries, finalIndex = {}, nil
 
 -- Death sequence: the moment the player dies, time stops dead and the last frame
 -- holds on screen for FREEZE_DURATION, then we hand that frame to the GameOver
@@ -63,7 +79,7 @@ local superPunchTimer = 0            -- frames until super-punch is ready again
 
 
 --Health
-local MAX_HEALTH = 20
+local MAX_HEALTH = 100
 local playerHealth = MAX_HEALTH
 
 -- Health bar layout (drawn with gfx primitives; no sprite asset)
@@ -86,6 +102,7 @@ local healthFlickerTimer = 0 -- frames of flicker remaining
 local function takeDamage(amount)
     playerHealth = math.max(0, playerHealth - amount)
     shakeTimer = SHAKE_DURATION
+    Score.add(-DAMAGE_PENALTY)
     Sounds.play("taking_damage")
 end
 
@@ -132,6 +149,31 @@ local function drawHealthBar()
                      fillW,
                      HEALTHBAR_H - HEALTHBAR_PAD * 2)
     end
+end
+
+-- Score readout, flush in the top-right corner. Uses a tiny font and a fixed-width,
+-- zero-padded number so the box never changes size (and reads all-zeros at the
+-- start). Drawn black on white; the white tab hugs the corner, so only the bottom
+-- and left borders (the edges facing into the screen) are drawn — no top or right line.
+local SCORE_FONT   = gfx.font.new("fonts/font-rains-1x")
+local SCORE_DIGITS = 6
+local SCORE_PAD    = 2
+-- Width is locked to the widest possible string (all digits at maximum).
+local SCORE_TEXT_W = SCORE_FONT:getTextWidth("Score:" .. string.rep("0", SCORE_DIGITS))
+local SCORE_BOX_W  = SCORE_TEXT_W + SCORE_PAD * 2
+local SCORE_BOX_H  = SCORE_FONT:getHeight() + SCORE_PAD * 2
+
+local function drawScore()
+    local text = "Score:" .. string.format("%0" .. SCORE_DIGITS .. "d", Score.get())
+    local x = 400 - SCORE_BOX_W
+    local y = 0
+
+    gfx.setColor(gfx.kColorWhite)
+    gfx.fillRect(x, y, SCORE_BOX_W, SCORE_BOX_H)
+    gfx.setColor(gfx.kColorBlack)
+    gfx.drawLine(x, y + SCORE_BOX_H - 1, x + SCORE_BOX_W, y + SCORE_BOX_H - 1)  -- bottom
+    gfx.drawLine(x, y, x, y + SCORE_BOX_H - 1)                                  -- left
+    SCORE_FONT:drawText(text, x + SCORE_PAD, y + SCORE_PAD)
 end
 
 -- Super-punch cooldown bar: small bar in the bottom-left over the left fist.
@@ -299,6 +341,7 @@ local waveCount  = 0    -- fully-spawned waves so far
 local waveTimer  = 0    -- frames until the next wave begins
 local spawnQueue = {}   -- ordered list of "enemy"/"laser"/"health" left to spawn this wave
 local spawnDelay = 0    -- frames until the next queued entity is spawned
+local waveClearScored = false  -- whether the current wave's clear bonus was already paid
 
 
 
@@ -356,8 +399,13 @@ local function switchToGame()
     waveTimer  = WAVE_CLEAR_DELAY
     spawnQueue = {}
     spawnDelay = 0
+    waveClearScored = false
     waveMsgTimer = 0
     waveMsgImage = nil
+
+    -- Reset scoring for the new run
+    Score.reset()
+    currentWave = 0
 
 
     background:add()
@@ -368,6 +416,13 @@ local function switchToGame()
     Crosshair.enter()
 
     currentScene = SCENE_GAME
+end
+
+-- From the game-over screen to the scoreboard, showing the run just played and the
+-- leaderboard recorded for it at death.
+local function switchToScoreboard()
+    Scoreboard.enter(finalEntries, finalIndex, Score.get(), currentWave)
+    currentScene = SCENE_SCOREBOARD
 end
 
 -- ─── Boot into menu ─────────────────────────────────────────────────────────
@@ -431,8 +486,13 @@ function pd.AButtonDown()
     end
 
     if currentScene == SCENE_GAMEOVER then
-        -- Only leave once the title screen is up; A does nothing mid-dissolve
-        if GameOver.isInteractive() then switchToMenu() end
+        -- Once the title screen is up, A advances to the scoreboard (no-op mid-dissolve)
+        if GameOver.isInteractive() then switchToScoreboard() end
+        return
+    end
+
+    if currentScene == SCENE_SCOREBOARD then
+        switchToMenu()
         return
     end
 
@@ -474,6 +534,7 @@ function pd.AButtonDown()
     if targetKind == "enemy" then
         target:kill()
         DeathAnim.play()          -- death animation only on an actual enemy hit
+        Score.add(target.points)
     elseif targetKind == "health" then
         target:kill()             -- destroyed without collecting
     elseif targetKind == "laser" then
@@ -623,12 +684,21 @@ local function runGameFrame()
         if fieldHasActiveHazards() then
             waveTimer = WAVE_CLEAR_DELAY
         else
+            -- The field just cleared: pay the wave-clear bonus once (every wave but the
+            -- very first, which had nothing to clear). Paid here, not at the next wave's
+            -- start, so dying during the clear delay still banks the bonus.
+            if not waveClearScored and waveCount > 0 then
+                Score.add(WAVE_CLEAR_POINTS)
+                waveClearScored = true
+            end
             waveTimer -= 1
             if waveTimer <= 0 then
                 -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
                 spawnQueue = buildSpawnQueue(waveCount)
                 spawnDelay = 0
+                waveClearScored = false
                 -- waveCount counts completed waves, so the one starting is waveCount + 1
+                currentWave = waveCount + 1
                 showWaveMessage(waveCount + 1)
             end
         end
@@ -671,8 +741,11 @@ local function runGameFrame()
                 and re.lane == pe.lane
                 and pe.progress <= re.progress
                 then
-                    -- Killed by a pushed enemy: no death animation
+                    -- Killed by a pushed enemy: no death animation. The chain bonus
+                    -- grows by CHAIN_STEP for each successive kill this enemy racks up.
                     re:kill()
+                    pe.chainKills += 1
+                    Score.add(CHAIN_STEP * pe.chainKills)
                 end
             end
         end
@@ -704,6 +777,7 @@ local function runGameFrame()
         local h = healths[i]
         if not h.dead and h:canCollect(playerLane) then
             heal(HEALTH_HEAL)
+            Score.add(HEALTH_POINTS)
             h:kill()
         end
     end
@@ -742,6 +816,7 @@ local function runGameFrame()
         superPunchTimer -= 1
     end
     drawHealthBar()
+    drawScore()
     drawSuperCooldownBar()
     drawWaveMessage()
     pd.drawFPS(0,220)
@@ -759,6 +834,9 @@ local function startGameOver()
     healths = {}
     DeathAnim.stop()
     gfx.sprite.removeAll()
+
+    -- Bank this run on the leaderboard, stashing the result for the scoreboard.
+    finalEntries, finalIndex = Score.record(Score.get(), currentWave)
 
     GameOver.begin(snapshot)
     currentScene = SCENE_GAMEOVER
@@ -788,6 +866,11 @@ function pd.update()
 
     if currentScene == SCENE_GAMEOVER then
         GameOver.update()
+        return
+    end
+
+    if currentScene == SCENE_SCOREBOARD then
+        Scoreboard.update()
         return
     end
 

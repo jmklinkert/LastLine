@@ -44,6 +44,8 @@ function Enemy:init(lane)
     self.frameCount = 150
     self.pushed = false
     self.damage = 20   -- damage dealt to the player on reaching the end
+    self.points = 100  -- score awarded for defeating this enemy with a punch
+    self.chainKills = 0 -- enemies this one has defeated while pushed (for the chain bonus)
 
     self.currentImage = nil
     self.currentFlip = gfx.kImageUnflipped
