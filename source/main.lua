@@ -13,6 +13,7 @@ import "deathAnimation"
 import "diamond"
 import "crosshair"
 import "sounds"
+import "gameOver"
 
 -- Localizing commonly used globals
 local pd = playdate
@@ -26,7 +27,16 @@ Sounds.load("healing")
 --Scenes
 local SCENE_MENU = "menu"
 local SCENE_GAME = "game"
+local SCENE_GAMEOVER = "gameover"
 local currentScene = SCENE_MENU
+
+-- Death sequence: the moment the player dies, time stops dead and the last frame
+-- holds on screen for FREEZE_DURATION, then we hand that frame to the GameOver
+-- module to disintegrate. `deathPhase` is nil during normal play and "freeze"
+-- while the hold plays out.
+local FREEZE_DURATION = 30   -- real frames the frozen frame holds (~1.5 s at 30 Hz)
+local deathPhase  = nil
+local freezeTimer = 0        -- real frames elapsed within the freeze
 
 --background
 local bgMiddle = gfx.image.new("images/tunnel_m.png")
@@ -53,7 +63,7 @@ local superPunchTimer = 0            -- frames until super-punch is ready again
 
 
 --Health
-local MAX_HEALTH = 100
+local MAX_HEALTH = 20
 local playerHealth = MAX_HEALTH
 
 -- Health bar layout (drawn with gfx primitives; no sprite asset)
@@ -327,6 +337,10 @@ local function switchToGame()
     spawnTimer = 150
     superPunchTimer = 0
 
+    -- Clear any death sequence left from a previous run
+    deathPhase  = nil
+    freezeTimer = 0
+
     -- Reset damage/heal feedback state
     shakeTimer = 0
     healthFlickerTimer = 0
@@ -380,6 +394,7 @@ end
 
 
 function pd.leftButtonDown()
+    if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     local previousLane = playerLane
     if playerLane == RIGHTLANE then
         playerLane = MIDDLELANE
@@ -394,6 +409,7 @@ function pd.leftButtonDown()
 end
 
 function pd.rightButtonDown()
+    if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     local previousLane = playerLane
     if playerLane == LEFTLANE then
         playerLane = MIDDLELANE
@@ -410,9 +426,18 @@ end
 function pd.AButtonDown() 
 
     if currentScene == SCENE_MENU then
-        switchToGame() 
+        switchToGame()
         return
     end
+
+    if currentScene == SCENE_GAMEOVER then
+        -- Only leave once the title screen is up; A does nothing mid-dissolve
+        if GameOver.isInteractive() then switchToMenu() end
+        return
+    end
+
+    -- Dead and slowing down: ignore further punches
+    if deathPhase ~= nil then return end
 
     Fists.punch()
 
@@ -457,7 +482,7 @@ function pd.AButtonDown()
 end
 
 function pd.BButtonDown()
-    if currentScene ~= SCENE_GAME then return end
+    if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     if superPunchTimer > 0 then return end
 
     superPunchTimer = SUPER_PUNCH_COOLDOWN
@@ -558,21 +583,9 @@ local function fieldHasActiveHazards()
 end
 
 
-function pd.update()
-
-    -- Menu Scene
-    if currentScene == SCENE_MENU then
-        MenuScreen.update()
-        return
-    end
-
-    --Game Scene 
-
-    --Game Over Check
-    if playerHealth <= 0 then
-        switchToMenu()
-        return
-    end
+-- One full frame of live gameplay: simulation + render. Pulled out of pd.update
+-- so the death slow-motion can run it on only some real frames to slow time down.
+local function runGameFrame()
 
     -- Damage feedback: offset the whole display for this frame while shaking
     applyScreenShake()
@@ -732,4 +745,63 @@ function pd.update()
     drawSuperCooldownBar()
     drawWaveMessage()
     pd.drawFPS(0,220)
-end 
+end
+
+-- Hand the death slow-motion's final frame off to the GameOver module and tear
+-- down all live gameplay, so the disintegration runs against a static capture
+-- instead of the still-updating scene.
+local function startGameOver()
+    pd.display.setOffset(0, 0)          -- drop any lingering shake offset
+    local snapshot = gfx.getDisplayImage()  -- the last frame the player saw
+
+    enemies = {}
+    lasers  = {}
+    healths = {}
+    DeathAnim.stop()
+    gfx.sprite.removeAll()
+
+    GameOver.begin(snapshot)
+    currentScene = SCENE_GAMEOVER
+    deathPhase   = nil
+end
+
+-- Advance the death slow-motion. Real time keeps ticking every frame, but the
+-- gameplay simulation only steps when the accumulator (fed by a time scale that
+-- ramps 1→0 over SLOWMO_DURATION) crosses a whole step, so motion visibly stalls
+-- and then freezes. On non-step frames nothing is redrawn, leaving the last frame
+-- on screen — which is what we eventually capture and disintegrate.
+-- Time is fully stopped: don't run any gameplay, just hold the frozen frame on
+-- screen (nothing is redrawn, so the last frame persists) until the hold elapses,
+-- then kick off the disintegration.
+local function updateFreeze()
+    freezeTimer += 1
+    if freezeTimer >= FREEZE_DURATION then
+        startGameOver()
+    end
+end
+
+function pd.update()
+    if currentScene == SCENE_MENU then
+        MenuScreen.update()
+        return
+    end
+
+    if currentScene == SCENE_GAMEOVER then
+        GameOver.update()
+        return
+    end
+
+    -- Game scene. The player's death stops time and freezes the frame instead of
+    -- cutting straight to the menu.
+    if deathPhase == nil and playerHealth <= 0 then
+        deathPhase  = "freeze"
+        freezeTimer = 0
+    end
+
+    if deathPhase == "freeze" then
+        updateFreeze()
+        return
+    end
+
+    runGameFrame()
+end
