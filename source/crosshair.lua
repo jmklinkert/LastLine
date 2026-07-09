@@ -22,7 +22,8 @@ local MAX_ARROW_OFFSET = 140
 
 -- ─── Sprite & state ──────────────────────────────────────────────────────────
 local sprite
-local arrowOffset = MAX_ARROW_OFFSET   -- current px spread of the arrows
+local additionalOffset = 15;
+local arrowOffset = MAX_ARROW_OFFSET  -- current px spread of the arrows
 local punchable   = false              -- when true, the dot/arrows are replaced
 
 local function render()
@@ -77,7 +78,7 @@ function Crosshair.update(lead, isPunchable, punchThreshold)
         -- Closer enemy -> tighter arrows; reaches 0 right at the punch threshold
         local t = lead.progress / punchThreshold   -- 0 (far) .. 1 (at threshold)
         if t > 1 then t = 1 end
-        arrowOffset = math.floor(MAX_ARROW_OFFSET * (1 - t))
+        arrowOffset = math.floor(MAX_ARROW_OFFSET * (1 - t)-additionalOffset)
     else
         -- No enemy on this lane: arrows fully spread
         arrowOffset = MAX_ARROW_OFFSET
