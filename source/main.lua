@@ -8,7 +8,8 @@ import "enemy"
 import "laser"
 import "health"
 import "menuScreen"
-import "tutorialScreen"
+import "field"
+import "tutorial"
 import "fists"
 import "deathAnimation"
 import "diamond"
@@ -263,12 +264,8 @@ local function drawWaveMessage()
     waveMsgTimer -= 1
 end
 
---Field entities. Enemies are hazards that can be punched/pushed; laser gates are
---hazards that can't be removed and block punches; health boosters are boons.
-local enemies = {}
-local lasers  = {}
-local healths = {}
-
+-- Field entities (enemies, laser gates, health boosters) and the per-frame field
+-- simulation live in the Field module now; main.lua just drives it.
 local HEALTH_HEAL = math.floor(MAX_HEALTH * 0.2)  -- a booster restores 40% of max
 
 
@@ -302,11 +299,6 @@ local LASERS_MAX = 3
 local function lasersPerWave(waveCount)
     return math.min(LASERS_MAX, math.floor(rampLevel(waveCount) / 2))
 end
-
--- A gate's own lane stays closed to new spawns until the gate has advanced past
--- this progress, guaranteeing a gap behind it big enough to maneuver around.
--- Other lanes are unaffected, so the overall spawn cadence is unchanged.
-local GATE_SPAWN_BLOCK = 0.15
 
 -- Health boosters: each wave has at most one, with the chance climbing linearly
 -- from HEALTH_CHANCE_MIN% on wave 1 to HEALTH_CHANCE_MAX% on HEALTH_CHANCE_WAVE_CAP.
@@ -363,12 +355,15 @@ local function updateBg()
 end
 
 
+-- Defined with the system-menu helpers below; forward-declared so switchToMenu can
+-- tear the "Skip Tutorial" item down on the way out of any scene.
+local removeTutorialSkip
+
 local function switchToMenu()
     -- MenuScreen.enter() calls gfx.sprite.removeAll(), so the sprites are torn
     -- down there; here we just drop our references to every field entity.
-    enemies = {}
-    lasers  = {}
-    healths = {}
+    removeTutorialSkip()
+    Field.reset()
     -- Clear any leftover shake so the menu isn't drawn off-centre
     shakeTimer = 0
     pd.display.setOffset(0, 0)
@@ -392,9 +387,7 @@ local function switchToGame()
     pd.display.setOffset(0, 0)
 
     -- Clear any field entities left from a previous run
-    enemies = {}
-    lasers  = {}
-    healths = {}
+    Field.reset()
 
     -- Reset wave state; first wave arrives after the clear delay
     waveCount  = 0
@@ -412,12 +405,31 @@ local function switchToGame()
 
     background:add()
     updateBg()
-    Fists.enter()
-    DeathAnim.enter()
-    Diamond.enter()
-    Crosshair.enter()
+    Field.enter()
 
     currentScene = SCENE_GAME
+end
+
+-- ─── Tutorial skip (system menu) ─────────────────────────────────────────────
+-- The tutorial is skippable at any point via the Playdate system menu, since its
+-- face buttons are all in use teaching moves. The item exists only while the
+-- tutorial is active.
+local sysMenu = pd.getSystemMenu()
+local tutorialMenuItem = nil
+
+local function addTutorialSkip()
+    if not tutorialMenuItem then
+        tutorialMenuItem = sysMenu:addMenuItem("Skip Tutorial", function()
+            switchToMenu()
+        end)
+    end
+end
+
+function removeTutorialSkip()
+    if tutorialMenuItem then
+        sysMenu:removeMenuItem(tutorialMenuItem)
+        tutorialMenuItem = nil
+    end
 end
 
 -- From the game-over screen to the scoreboard, showing the run just played and the
@@ -434,9 +446,23 @@ local function switchToLeaderboard()
     currentScene = SCENE_SCOREBOARD
 end
 
--- From the menu into the placeholder tutorial screen.
+-- From the menu into the interactive tutorial. Sets up the same field scene as the
+-- game (background, fists, targeting) but hands pacing to the Tutorial step machine.
+-- No scoring or health: the run state is irrelevant here.
 local function switchToTutorial()
-    TutorialScreen.enter()
+    playerLane = MIDDLELANE
+    superPunchTimer = 0
+    deathPhase  = nil
+    shakeTimer = 0
+    pd.display.setOffset(0, 0)
+
+    Field.reset()
+    background:add()
+    updateBg()
+    Field.enter()
+
+    Tutorial.start()
+    addTutorialSkip()
     currentScene = SCENE_TUTORIAL
 end
 
@@ -446,25 +472,23 @@ MenuScreen.enter()
 
 -- ─── Input ──────────────────────────────────────────────────────────────────
 
--- The laser gate nearest the player (highest progress) that is on the player's
--- lane and within punching reach, or nil. A punch/super-punch can't pass it: it
--- shields anything behind it, and a regular punch into it hurts the player.
-local function frontmostLaserInRange()
-    local front = nil
-    for i = 1, #lasers do
-        local l = lasers[i]
-        if not l.dead and l:inRange(playerLane, playerRange) then
-            if not front or l.progress > front.progress then
-                front = l
-            end
-        end
+-- Shift the player one lane in dir (-1 = left, +1 = right), clamped to the three
+-- lanes. Returns true if the lane actually changed. Shared by the game and tutorial.
+local function shiftLane(dir)
+    local previousLane = playerLane
+    playerLane = math.max(LEFTLANE, math.min(RIGHTLANE, playerLane + dir))
+    if playerLane ~= previousLane then
+        -- Perspective shifted; the baked death animation no longer lines up
+        DeathAnim.stop()
     end
-    return front
+    updateBg()
+    return playerLane ~= previousLane
 end
 
 
 -- On the menu, all four arrows cycle the highlighted option (up/left back,
--- down/right forward); in-game, left/right change lanes and up/down do nothing.
+-- down/right forward); in the game and tutorial, left/right change lanes and
+-- up/down do nothing.
 function pd.upButtonDown()
     if currentScene == SCENE_MENU then
         MenuScreen.moveSelection(-1)
@@ -482,18 +506,12 @@ function pd.leftButtonDown()
         MenuScreen.moveSelection(-1)
         return
     end
+    if currentScene == SCENE_TUTORIAL then
+        if shiftLane(-1) then Tutorial.onLaneChange() end
+        return
+    end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
-    local previousLane = playerLane
-    if playerLane == RIGHTLANE then
-        playerLane = MIDDLELANE
-    elseif playerLane == MIDDLELANE then
-        playerLane = LEFTLANE
-    end
-    if playerLane ~= previousLane then
-        -- Perspective shifted; the baked death animation no longer lines up
-        DeathAnim.stop()
-    end
-    updateBg()
+    shiftLane(-1)
 end
 
 function pd.rightButtonDown()
@@ -501,17 +519,12 @@ function pd.rightButtonDown()
         MenuScreen.moveSelection(1)
         return
     end
+    if currentScene == SCENE_TUTORIAL then
+        if shiftLane(1) then Tutorial.onLaneChange() end
+        return
+    end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
-    local previousLane = playerLane
-    if playerLane == LEFTLANE then
-        playerLane = MIDDLELANE
-    elseif playerLane == MIDDLELANE then
-        playerLane = RIGHTLANE
-    end
-    if playerLane ~= previousLane then
-        DeathAnim.stop()
-    end
-    updateBg()
+    shiftLane(1)
 end
 
 
@@ -530,7 +543,7 @@ function pd.AButtonDown()
     end
 
     if currentScene == SCENE_TUTORIAL then
-        switchToMenu()
+        Tutorial.onPunch(Field.punch(playerLane, playerRange))
         return
     end
 
@@ -548,150 +561,33 @@ function pd.AButtonDown()
     -- Dead and slowing down: ignore further punches
     if deathPhase ~= nil then return end
 
-    Fists.punch()
-
-    --In-Game: Punch behaviour. A punch only connects with the single frontmost
-    --object in range on the player's lane (closest = highest progress), whatever
-    --its type. Anything behind it is untouched: enemies behind the first enemy
-    --survive, a health booster behind an enemy isn't destroyed, and a gate behind
-    --an enemy doesn't hurt the player.
-    local rangeThreshold = 1 - playerRange / 100
-    local target, targetKind, targetProgress = nil, nil, -1
-
-    for i = 1, #enemies do
-        local e = enemies[i]
-        if not e.dead and e.lane == playerLane
-        and e.progress >= rangeThreshold and e.progress > targetProgress then
-            target, targetKind, targetProgress = e, "enemy", e.progress
+    -- In-game punch: Field resolves the hit (kill/hurt + punch pose + death flash);
+    -- here we apply the run's consequences — score an enemy, take damage from a gate.
+    local hit = Field.punch(playerLane, playerRange)
+    if hit then
+        if hit.kind == "enemy" then
+            Score.add(hit.points)
+        elseif hit.kind == "laser" then
+            takeDamage(hit.damage)
         end
-    end
-    for i = 1, #lasers do
-        local l = lasers[i]
-        if not l.dead and l.lane == playerLane
-        and l.progress >= rangeThreshold and l.progress > targetProgress then
-            target, targetKind, targetProgress = l, "laser", l.progress
-        end
-    end
-    for i = 1, #healths do
-        local h = healths[i]
-        if not h.dead and h.lane == playerLane
-        and h.progress >= rangeThreshold and h.progress > targetProgress then
-            target, targetKind, targetProgress = h, "health", h.progress
-        end
-    end
-
-    if targetKind == "enemy" then
-        target:kill()
-        DeathAnim.play()          -- death animation only on an actual enemy hit
-        Score.add(target.points)
-    elseif targetKind == "health" then
-        target:kill()             -- destroyed without collecting
-    elseif targetKind == "laser" then
-        takeDamage(target.damage) -- gate is indestructible; the player gets hurt
+        -- health: destroyed without collecting; no score or damage
     end
 end
 
 function pd.BButtonDown()
+    if currentScene == SCENE_TUTORIAL then
+        if superPunchTimer > 0 then return end
+        superPunchTimer = SUPER_PUNCH_COOLDOWN
+        Tutorial.onSuperPunch(Field.superPunch(playerLane, playerRange))
+        return
+    end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     if superPunchTimer > 0 then return end
-
     superPunchTimer = SUPER_PUNCH_COOLDOWN
-    Fists.superPunch()
-
-    -- A gate blocks the push too (enemies behind it are safe), but costs no health.
-    local blockingLaser = frontmostLaserInRange()
-
-    for i = 1, #enemies do
-        local e = enemies[i]
-        if not e.dead and e:canBeHit(playerLane, playerRange)
-        and not (blockingLaser and blockingLaser.progress > e.progress) then
-            e:push()
-        end
-    end
+    Field.superPunch(playerLane, playerRange)
 end
 
 -- ─── Update loop ────────────────────────────────────────────────────────────
-
--- A lane is off-limits for new spawns while it still has a gate close to the
--- spawn point, so nothing lands right behind a gate on its own lane.
-local function laneBlockedByGate(lane)
-    for i = 1, #lasers do
-        local l = lasers[i]
-        if not l.dead and l.lane == lane and l.progress < GATE_SPAWN_BLOCK then
-            return true
-        end
-    end
-    return false
-end
-
--- Pick a random lane (1–3) that isn't blocked by a freshly-spawned gate. If every
--- lane is blocked (unlikely), fall back to any lane rather than skipping the spawn.
-local function pickSpawnLane()
-    local free = {}
-    for lane = 1, 3 do
-        if not laneBlockedByGate(lane) then free[#free+1] = lane end
-    end
-    if #free == 0 then return math.random(1, 3) end
-    return free[math.random(#free)]
-end
-
-local function spawnEnemy()
-    table.insert(enemies, Enemy(pickSpawnLane()))
-end
-
-local function spawnLaser()
-    table.insert(lasers, Laser(pickSpawnLane()))
-end
-
-local function spawnHealth()
-    table.insert(healths, Health(pickSpawnLane()))
-end
-
--- The enemy nearest the player (highest progress), or nil if none are alive.
-local function leadingEnemy()
-    local lead, best = nil, -1
-    for i = 1, #enemies do
-        local e = enemies[i]
-        if not e.dead and e.progress > best then
-            best = e.progress
-            lead = e
-        end
-    end
-    return lead
-end
-
--- The nearest enemy on a specific lane (highest progress), or nil if none.
-local function leadingEnemyOnLane(lane)
-    local lead, best = nil, -1
-    for i = 1, #enemies do
-        local e = enemies[i]
-        if not e.dead and e.lane == lane and e.progress > best then
-            best = e.progress
-            lead = e
-        end
-    end
-    return lead
-end
-
--- True while any advancing hazard remains. Pushed enemies are retreating and are
--- ignored, so a super-punch doesn't hold up the next wave's countdown. Laser gates
--- always count until they clear the lane, since they can't be removed. Health
--- boosters are boons and never delay the next wave.
-local function fieldHasActiveHazards()
-    for i = 1, #enemies do
-        local e = enemies[i]
-        if not e.dead and not e.pushed then
-            return true
-        end
-    end
-    for i = 1, #lasers do
-        if not lasers[i].dead then
-            return true
-        end
-    end
-    return false
-end
-
 
 -- One full frame of live gameplay: simulation + render. Pulled out of pd.update
 -- so the death slow-motion can run it on only some real frames to slow time down.
@@ -709,11 +605,11 @@ local function runGameFrame()
         if spawnDelay <= 0 then
             local what = table.remove(spawnQueue, 1)
             if what == "enemy" then
-                spawnEnemy()
+                Field.spawnEnemy(Field.pickSpawnLane())
             elseif what == "laser" then
-                spawnLaser()
+                Field.spawnLaser(Field.pickSpawnLane())
             elseif what == "health" then
-                spawnHealth()
+                Field.spawnHealth(Field.pickSpawnLane())
             end
 
             if #spawnQueue > 0 then
@@ -730,7 +626,7 @@ local function runGameFrame()
         -- from the last wave is gone (defeated, reached the end, or—for gates—cleared
         -- the lane). Pushed enemies are retreating and don't count. While any remain,
         -- keep the timer pinned at full so it begins counting only after the field clears.
-        if fieldHasActiveHazards() then
+        if Field.hasActiveHazards() then
             waveTimer = WAVE_CLEAR_DELAY
         else
             -- The field just cleared: pay the wave-clear bonus once (every wave but the
@@ -754,110 +650,18 @@ local function runGameFrame()
     end
 
 
-    -- Push the current lane into every entity module so they pick the right
-    -- lane-offset sheet and flip this frame.
-    Enemy.setPlayerLane(playerLane)
-    Laser.setPlayerLane(playerLane)
-    Health.setPlayerLane(playerLane)
-
-    -- Marker above the nearest enemy; blinks once that enemy is punchable
-    local lead = leadingEnemy()
-    local punchable = lead ~= nil and lead:canBeHit(playerLane, playerRange)
-    Diamond.update(lead, punchable)
-
-    -- Crosshair tracks the nearest enemy on the *current* lane: arrows close in as
-    -- it approaches, and the punchable reticle replaces it once it's in range.
-    local laneLead = leadingEnemyOnLane(playerLane)
-    local lanePunchable = laneLead ~= nil and laneLead:canBeHit(playerLane, playerRange)
-    Crosshair.update(laneLead, lanePunchable, 1 - playerRange / 100)
-
-    Fists.update()
-    DeathAnim.update()
-    gfx.sprite.update()
-
-
-
-    --Pushed-Enemy Collision: Pushed Enemies defeat other enemies they catch up with
-
-    for i = 1, #enemies do 
-        local pe = enemies[i]
-        if pe.pushed and not pe.dead then
-            for j = 1, #enemies do
-                local re = enemies[j]
-                if i ~= j
-                and not re.pushed
-                and not re.dead
-                and re.lane == pe.lane
-                and pe.progress <= re.progress
-                then
-                    -- Killed by a pushed enemy: no death animation. The chain bonus
-                    -- grows by CHAIN_STEP for each successive kill this enemy racks up.
-                    re:kill()
-                    pe.chainKills += 1
-                    Score.add(CHAIN_STEP * pe.chainKills)
-                end
-            end
-        end
-    end
-
-
-    --Pushed-Enemy / Gate Collision: a retreating enemy shoved back into a gate is
-    --destroyed without passing through; the gate is unharmed. (Only enemies in front
-    --of a gate ever get pushed, so a non-dead pushed enemy reaching the gate's
-    --progress means it has just hit it.)
-    for i = 1, #enemies do
-        local pe = enemies[i]
-        if pe.pushed and not pe.dead then
-            for j = 1, #lasers do
-                local l = lasers[j]
-                if not l.dead and l.lane == pe.lane and pe.progress <= l.progress then
-                    pe:kill()
-                    break
-                end
-            end
-        end
-    end
-
-
-    --Passive Health pickup: collected when on the player's lane within heal range.
-    --Pushing an enemy through a booster never affects it, so it's only ever removed
-    --here (collected) or by a punch / reaching the end.
-    for i = #healths, 1, -1 do
-        local h = healths[i]
-        if not h.dead and h:canCollect(playerLane) then
+    -- Field simulation + render for this frame. Consequences that cross back into
+    -- the run (a booster collected, a chain kill, an enemy or gate reaching the end)
+    -- come back as events, which we translate into score, healing and damage here.
+    local events = Field.update(playerLane, playerRange)
+    for _, ev in ipairs(events) do
+        if ev.kind == "damage" then
+            takeDamage(ev.amount)
+        elseif ev.kind == "heal" then
             heal(HEALTH_HEAL)
             Score.add(HEALTH_POINTS)
-            h:kill()
-        end
-    end
-
-
-    --Clean up dead Enemies. Enemies that reached the end deal their damage.
-    for i = #enemies, 1, -1 do
-        local e = enemies[i]
-        if e.dead then
-            if e.reachedEnd then
-                takeDamage(e.damage)
-            end
-            table.remove(enemies,i)
-        end
-    end
-
-    --Clean up gates. A gate reaching the end only hurts the player if they share its lane.
-    for i = #lasers, 1, -1 do
-        local l = lasers[i]
-        if l.dead then
-            if l.reachedEnd and l.lane == playerLane then
-                takeDamage(l.damage)
-            end
-            table.remove(lasers, i)
-        end
-    end
-
-    --Clean up boosters (collected, punched, or drifted past the end).
-    for i = #healths, 1, -1 do
-        if healths[i].dead then
-            table.remove(healths, i)
+        elseif ev.kind == "chainKill" then
+            Score.add(CHAIN_STEP * ev.count)
         end
     end
 
@@ -878,9 +682,7 @@ local function startGameOver()
     pd.display.setOffset(0, 0)          -- drop any lingering shake offset
     local snapshot = gfx.getDisplayImage()  -- the last frame the player saw
 
-    enemies = {}
-    lasers  = {}
-    healths = {}
+    Field.reset()
     DeathAnim.stop()
     gfx.sprite.removeAll()
 
@@ -907,6 +709,27 @@ local function updateFreeze()
     end
 end
 
+-- One frame of the tutorial: the shared field runs exactly as in the game, but the
+-- Tutorial step machine spawns the props and the field's damage/heal events are left
+-- unapplied — nothing here costs (or restores) health, so the player can't fail. The
+-- only run-style HUD kept is the super-punch cooldown, for the B-button lesson.
+local function runTutorialFrame()
+    Tutorial.spawnIfNeeded(playerLane)
+    local events = Field.update(playerLane, playerRange)
+    Tutorial.update(events, playerLane)
+
+    if Tutorial.isFinished() then
+        switchToMenu()
+        return
+    end
+
+    if superPunchTimer > 0 then
+        superPunchTimer -= 1
+    end
+    drawSuperCooldownBar()
+    Tutorial.draw()
+end
+
 function pd.update()
     if currentScene == SCENE_MENU then
         MenuScreen.update()
@@ -924,7 +747,7 @@ function pd.update()
     end
 
     if currentScene == SCENE_TUTORIAL then
-        TutorialScreen.update()
+        runTutorialFrame()
         return
     end
 
