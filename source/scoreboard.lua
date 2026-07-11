@@ -45,8 +45,12 @@ function Scoreboard.update()
     gfx.setImageDrawMode(gfx.kDrawModeFillWhite)   -- white text on the black screen
 
     gfx.drawTextAligned("*SCOREBOARD*", 200, 16, kTextAlignment.center)
-    gfx.drawTextAligned("This run: " .. currentScore .. "  (Wave " .. currentWave .. ")",
-                        200, 40, kTextAlignment.center)
+    -- The "this run" line only applies when opened right after a run; from the menu
+    -- there's no current run, so currentScore is nil and the line is skipped.
+    if currentScore then
+        gfx.drawTextAligned("This run: " .. currentScore .. "  (Wave " .. currentWave .. ")",
+                            200, 40, kTextAlignment.center)
+    end
 
     local rows = math.min(#entries, MAX_ROWS)
     for i = 1, rows do

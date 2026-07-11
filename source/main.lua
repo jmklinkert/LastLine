@@ -8,6 +8,7 @@ import "enemy"
 import "laser"
 import "health"
 import "menuScreen"
+import "tutorialScreen"
 import "fists"
 import "deathAnimation"
 import "diamond"
@@ -31,6 +32,7 @@ local SCENE_MENU = "menu"
 local SCENE_GAME = "game"
 local SCENE_GAMEOVER = "gameover"
 local SCENE_SCOREBOARD = "scoreboard"
+local SCENE_TUTORIAL = "tutorial"
 local currentScene = SCENE_MENU
 
 -- Scoring point values
@@ -425,6 +427,19 @@ local function switchToScoreboard()
     currentScene = SCENE_SCOREBOARD
 end
 
+-- From the menu into the scoreboard to browse the saved leaderboard. There's no
+-- current run, so the "this run" row is omitted and nothing is highlighted.
+local function switchToLeaderboard()
+    Scoreboard.enter(Score.entries(), nil, nil, nil)
+    currentScene = SCENE_SCOREBOARD
+end
+
+-- From the menu into the placeholder tutorial screen.
+local function switchToTutorial()
+    TutorialScreen.enter()
+    currentScene = SCENE_TUTORIAL
+end
+
 -- ─── Boot into menu ─────────────────────────────────────────────────────────
  
 MenuScreen.enter()
@@ -448,7 +463,25 @@ local function frontmostLaserInRange()
 end
 
 
+-- On the menu, all four arrows cycle the highlighted option (up/left back,
+-- down/right forward); in-game, left/right change lanes and up/down do nothing.
+function pd.upButtonDown()
+    if currentScene == SCENE_MENU then
+        MenuScreen.moveSelection(-1)
+    end
+end
+
+function pd.downButtonDown()
+    if currentScene == SCENE_MENU then
+        MenuScreen.moveSelection(1)
+    end
+end
+
 function pd.leftButtonDown()
+    if currentScene == SCENE_MENU then
+        MenuScreen.moveSelection(-1)
+        return
+    end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     local previousLane = playerLane
     if playerLane == RIGHTLANE then
@@ -464,6 +497,10 @@ function pd.leftButtonDown()
 end
 
 function pd.rightButtonDown()
+    if currentScene == SCENE_MENU then
+        MenuScreen.moveSelection(1)
+        return
+    end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
     local previousLane = playerLane
     if playerLane == LEFTLANE then
@@ -481,7 +518,19 @@ end
 function pd.AButtonDown() 
 
     if currentScene == SCENE_MENU then
-        switchToGame()
+        local choice = MenuScreen.selectedId()
+        if choice == "start" then
+            switchToGame()
+        elseif choice == "leaderboard" then
+            switchToLeaderboard()
+        elseif choice == "tutorial" then
+            switchToTutorial()
+        end
+        return
+    end
+
+    if currentScene == SCENE_TUTORIAL then
+        switchToMenu()
         return
     end
 
@@ -871,6 +920,11 @@ function pd.update()
 
     if currentScene == SCENE_SCOREBOARD then
         Scoreboard.update()
+        return
+    end
+
+    if currentScene == SCENE_TUTORIAL then
+        TutorialScreen.update()
         return
     end
 

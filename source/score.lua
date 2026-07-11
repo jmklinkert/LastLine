@@ -32,6 +32,13 @@ local function ensureLoaded()
     leaderboard = (data and data.entries) or {}
 end
 
+-- The persisted leaderboard as-is (top MAX_ENTRIES runs), for viewing outside of a
+-- run (e.g. from the menu). Loads it on first access like the record path does.
+function Score.entries()
+    ensureLoaded()
+    return leaderboard
+end
+
 -- Current local date as "YYYY-MM-DD".
 local function today()
     local t = pd.getTime()
