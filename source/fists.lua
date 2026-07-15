@@ -7,9 +7,14 @@ Fists = {}
 
 -- ─── Assets ──────────────────────────────────────────────────────────────────
 
-local fistImages     = gfx.imagetable.new("images/fists")
-local IDLE_FRAME     = 1   -- ready pose
-local EXTENDED_FRAME = 2   -- impact pose
+-- Each arm has its own pair of frames: right arm first, then left arm. The left-arm
+-- frames are authored facing the same way as the right and are mirrored at draw time
+-- (see the setImage calls in Fists.update).
+local fistImages           = gfx.imagetable.new("images/fists")
+local RIGHT_IDLE_FRAME     = 1   -- right arm, ready pose
+local RIGHT_EXTENDED_FRAME = 2   -- right arm, impact pose
+local LEFT_IDLE_FRAME      = 3   -- left arm, ready pose
+local LEFT_EXTENDED_FRAME  = 4   -- left arm, impact pose
 
 -- ─── Layout ──────────────────────────────────────────────────────────────────
 
@@ -158,10 +163,11 @@ function Fists.update()
         idleTimer = (idleTimer + 1) % IDLE_PERIOD
     end
 
-    -- Commit to sprites. Flip is set every frame on setImage so it survives
-    -- any potential image-swap reset and stays explicit.
-    local rightImage = fistImages:getImage(rExtended and EXTENDED_FRAME or IDLE_FRAME)
-    local leftImage  = fistImages:getImage(lExtended and EXTENDED_FRAME or IDLE_FRAME)
+    -- Commit to sprites, each arm from its own frames. Flip is set every frame on
+    -- setImage so it survives any potential image-swap reset and stays explicit: the
+    -- right arm is drawn as authored, the left arm mirrored.
+    local rightImage = fistImages:getImage(rExtended and RIGHT_EXTENDED_FRAME or RIGHT_IDLE_FRAME)
+    local leftImage  = fistImages:getImage(lExtended and LEFT_EXTENDED_FRAME  or LEFT_IDLE_FRAME)
 
     rightSprite:setImage(rightImage)
     leftSprite:setImage(leftImage, gfx.kImageFlippedX)
