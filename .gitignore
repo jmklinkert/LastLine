@@ -1,3 +1,10 @@
+# Playdate build output. Reproducible from source with:
+#   pdc source builds/LastLine.pdx
+# Keeping compiled .pdx bundles out of the repo avoids binary diff noise and the
+# ambiguity of several bundles sitting side by side.
+builds/
+*.pdx/
+
 # Compiled Lua sources
 luac.out
 
