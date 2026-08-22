@@ -7,6 +7,8 @@ import "CoreLibs/ui"
 import "enemy"
 import "laser"
 import "health"
+import "turret"
+import "projectile"
 import "menuScreen"
 import "field"
 import "tutorial"
@@ -306,6 +308,19 @@ local function lasersPerWave(waveCount)
     return math.min(LASERS_MAX, math.floor(rampLevel(waveCount) / 2))
 end
 
+-- Turrets ramp exactly like gates. They hold a lane until destroyed, so the three
+-- lanes cap how many can ever stand at once; anything the ramp asks for beyond a
+-- free lane is dropped at spawn time.
+--
+-- TURRET_TEST_MODE forces one every wave so the mechanic can be exercised without
+-- grinding out the ramp. Set it to false for the real curve.
+local TURRETS_MAX = 3
+local TURRET_TEST_MODE = true
+local function turretsPerWave(waveCount)
+    if TURRET_TEST_MODE then return 1 end
+    return math.min(TURRETS_MAX, math.floor(rampLevel(waveCount) / 2))
+end
+
 -- Health boosters: each wave has at most one, with the chance climbing linearly
 -- from HEALTH_CHANCE_MIN% on wave 1 to HEALTH_CHANCE_MAX% on HEALTH_CHANCE_WAVE_CAP.
 local HEALTH_CHANCE_MIN      = 5
@@ -324,6 +339,7 @@ local function buildSpawnQueue(waveCount)
     local q = {}
     for _ = 1, enemiesPerWave(waveCount) do q[#q+1] = "enemy" end
     for _ = 1, lasersPerWave(waveCount) do q[#q+1] = "laser" end
+    for _ = 1, turretsPerWave(waveCount) do q[#q+1] = "turret" end
     if math.random(100) <= healthChance(waveCount + 1) then
         q[#q+1] = "health"
     end
@@ -587,6 +603,7 @@ function pd.AButtonDown()
             takeDamage(hit.damage)
         end
         -- health: destroyed without collecting; no score or damage
+        -- projectile: shot out of the air; no score or damage either
     end
 end
 
@@ -626,6 +643,11 @@ local function runGameFrame()
                 Field.spawnLaser(Field.pickSpawnLane())
             elseif what == "health" then
                 Field.spawnHealth(Field.pickSpawnLane())
+            elseif what == "turret" then
+                -- Only one turret per lane; if all three are already held, the
+                -- spawn is simply dropped rather than doubling up.
+                local lane = Field.pickTurretLane()
+                if lane then Field.spawnTurret(lane) end
             end
 
             if #spawnQueue > 0 then
@@ -678,6 +700,8 @@ local function runGameFrame()
             Score.add(HEALTH_POINTS)
         elseif ev.kind == "chainKill" then
             Score.add(CHAIN_STEP * ev.count)
+        elseif ev.kind == "turretDestroyed" then
+            Score.add(ev.points)
         end
     end
 

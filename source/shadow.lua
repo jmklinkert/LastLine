@@ -16,11 +16,23 @@ local gfx = playdate.graphics
 
 Shadow = {}
 
--- Indexed by absolute lane offset, matching the caster sheets' same/one/two split.
-local shadowTables = {
-    [0] = gfx.imagetable.new("images/shadow_same"),
-    [1] = gfx.imagetable.new("images/shadow_one"),
-    [2] = gfx.imagetable.new("images/shadow_two"),
+-- Shadow art sets, each indexed by absolute lane offset to match the caster
+-- sheets' same/one/two split. Projectiles get their own square-cornered shadow so
+-- an incoming shot reads differently on the floor from an enemy or a booster.
+Shadow.NORMAL     = "normal"
+Shadow.PROJECTILE = "projectile"
+
+local SETS = {
+    [Shadow.NORMAL] = {
+        [0] = gfx.imagetable.new("images/shadow_same"),
+        [1] = gfx.imagetable.new("images/shadow_one"),
+        [2] = gfx.imagetable.new("images/shadow_two"),
+    },
+    [Shadow.PROJECTILE] = {
+        [0] = gfx.imagetable.new("images/projectile-shadow_same"),
+        [1] = gfx.imagetable.new("images/projectile-shadow_one"),
+        [2] = gfx.imagetable.new("images/projectile-shadow_two"),
+    },
 }
 
 -- Shadows sit on a single flat layer beneath the whole entity band (z 2-39), so a
@@ -39,7 +51,7 @@ function Shadow.new()
 end
 
 -- Point a shadow sprite at the frame matching its caster's current frame, lane
--- offset and flip.
-function Shadow.apply(sprite, absOffset, frame, flip)
-    sprite:setImage(shadowTables[absOffset]:getImage(frame), flip)
+-- offset and flip. `kind` selects the art set and defaults to the normal one.
+function Shadow.apply(sprite, absOffset, frame, flip, kind)
+    sprite:setImage(SETS[kind or Shadow.NORMAL][absOffset]:getImage(frame), flip)
 end

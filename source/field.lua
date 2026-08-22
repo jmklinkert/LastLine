@@ -3,6 +3,8 @@ import "CoreLibs/sprites"
 import "enemy"
 import "laser"
 import "health"
+import "turret"
+import "projectile"
 import "fists"
 import "deathAnimation"
 import "diamond"
@@ -10,7 +12,8 @@ import "crosshair"
 
 local gfx = playdate.graphics
 
--- The Field owns every live gameplay entity (enemies, laser gates, health boosters)
+-- The Field owns every live gameplay entity (enemies, laser gates, health boosters,
+-- turrets and their projectiles)
 -- and runs one frame of the shared simulation: entity movement, targeting markers,
 -- collisions and cleanup. It knows nothing about scoring, player health, waves or the
 -- tutorial — those are the caller's concern. Effects that cross that boundary (a hit
@@ -22,9 +25,13 @@ Field = {}
 
 -- Field entities. Enemies are hazards that can be punched/pushed; laser gates are
 -- hazards that can't be removed and block punches; health boosters are boons.
-local enemies = {}
-local lasers  = {}
-local healths = {}
+-- Turrets are emplacements that park out of reach and shell the lane they hold;
+-- projectiles are what they fire, and can be punched out of the air or shoved back.
+local enemies     = {}
+local lasers      = {}
+local healths     = {}
+local turrets     = {}
+local projectiles = {}
 
 -- A gate's own lane stays closed to new spawns until the gate has advanced past this
 -- progress, guaranteeing a gap behind it big enough to maneuver around.
@@ -45,9 +52,11 @@ end
 -- Drop every live entity. The sprites themselves are torn down by the caller's
 -- gfx.sprite.removeAll(); here we just clear our references.
 function Field.reset()
-    enemies = {}
-    lasers  = {}
-    healths = {}
+    enemies     = {}
+    lasers      = {}
+    healths     = {}
+    turrets     = {}
+    projectiles = {}
 end
 
 -- ─── Spawning ────────────────────────────────────────────────────────────────
@@ -91,6 +100,36 @@ function Field.spawnHealth(lane)
     table.insert(healths, Health(lane))
 end
 
+function Field.spawnTurret(lane)
+    table.insert(turrets, Turret(lane))
+end
+
+-- Fired by a turret, so it starts at the turret's own position rather than at the
+-- top of the lane.
+function Field.spawnProjectile(lane, progress)
+    table.insert(projectiles, Projectile(lane, progress))
+end
+
+-- A turret holds its lane, so at most one can occupy each: three on the field is the
+-- ceiling. Returns a free lane, or nil when every lane is already held — the caller
+-- drops the spawn rather than doubling up.
+function Field.pickTurretLane()
+    local free = {}
+    for lane = 1, 3 do
+        local taken = false
+        for i = 1, #turrets do
+            local t = turrets[i]
+            if not t.dead and t.lane == lane then
+                taken = true
+                break
+            end
+        end
+        if not taken and not laneBlockedByGate(lane) then free[#free+1] = lane end
+    end
+    if #free == 0 then return nil end
+    return free[math.random(#free)]
+end
+
 -- ─── Queries ─────────────────────────────────────────────────────────────────
 
 -- The enemy nearest the player (highest progress), or nil if none are alive.
@@ -123,6 +162,12 @@ end
 -- ignored, so a super-punch doesn't hold up the next wave's countdown. Laser gates
 -- always count until they clear the lane, since they can't be removed. Health
 -- boosters are boons and never count.
+--
+-- Turrets and their shots are deliberately excluded. A turret parks and stays put
+-- indefinitely, so counting it would pin the wave timer forever and no wave could
+-- ever start again; the same goes for the shots it keeps producing. Turrets are
+-- therefore standing terrain that accumulates across waves (one per lane) rather
+-- than something a wave waits on.
 function Field.hasActiveHazards()
     for i = 1, #enemies do
         local e = enemies[i]
@@ -142,14 +187,17 @@ local function countLive(list)
     return n
 end
 
-function Field.enemyCount()  return countLive(enemies) end
-function Field.laserCount()  return countLive(lasers)  end
-function Field.healthCount() return countLive(healths) end
+function Field.enemyCount()      return countLive(enemies)     end
+function Field.laserCount()      return countLive(lasers)      end
+function Field.healthCount()     return countLive(healths)     end
+function Field.turretCount()     return countLive(turrets)     end
+function Field.projectileCount() return countLive(projectiles) end
 
 -- No live entity of any kind on the field. Used by the tutorial to know when a step's
 -- props have all been dealt with (so it can advance or respawn them).
 function Field.isEmpty()
     return countLive(enemies) == 0 and countLive(lasers) == 0 and countLive(healths) == 0
+       and countLive(turrets) == 0 and countLive(projectiles) == 0
 end
 
 -- The laser gate nearest the player (highest progress) that is on the player's lane
@@ -167,6 +215,24 @@ local function frontmostLaserInRange(playerLane, playerRange)
     return front
 end
 
+-- A retreating enemy or shot that has reached a turret on its own lane destroys it,
+-- and is consumed doing so. Returns true if it connected. Module-level rather than a
+-- closure inside the frame loop so it isn't reallocated 30 times a second.
+local function pushedIntoTurret(pusher, turretList, events)
+    if pusher.dead or not pusher.pushed then return false end
+    for j = 1, #turretList do
+        local t = turretList[j]
+        if not t.dead and t.lane == pusher.lane and pusher.progress <= t.progress then
+            local points = t.points
+            t:kill()
+            pusher:kill()
+            events[#events+1] = { kind = "turretDestroyed", points = points }
+            return true
+        end
+    end
+    return false
+end
+
 -- ─── Player actions ──────────────────────────────────────────────────────────
 
 -- A punch connects with the single frontmost object in range on the player's lane
@@ -176,6 +242,7 @@ end
 -- and the tutorial want those. Returns a descriptor of what was hit so the caller can
 -- score / react, or nil if the punch connected with nothing:
 --   { kind = "enemy", points = n } | { kind = "health" } | { kind = "laser", damage = n }
+--   | { kind = "projectile" }
 function Field.punch(playerLane, playerRange)
     Fists.punch()
 
@@ -203,8 +270,20 @@ function Field.punch(playerLane, playerRange)
             target, targetKind, targetProgress = h, "health", h.progress
         end
     end
+    -- Turrets are never candidates: they park at a progress far short of the punch
+    -- threshold, so they simply can't be reached this way. Their shots can.
+    for i = 1, #projectiles do
+        local p = projectiles[i]
+        if not p.dead and p.lane == playerLane
+        and p.progress >= rangeThreshold and p.progress > targetProgress then
+            target, targetKind, targetProgress = p, "projectile", p.progress
+        end
+    end
 
-    if targetKind == "enemy" then
+    if targetKind == "projectile" then
+        target:kill()             -- shot out of the air
+        return { kind = "projectile" }
+    elseif targetKind == "enemy" then
         target:kill()
         DeathAnim.play()          -- death animation only on an actual enemy hit
         return { kind = "enemy", points = target.points }
@@ -233,6 +312,16 @@ function Field.superPunch(playerLane, playerRange)
             pushed += 1
         end
     end
+    -- Shots are shoved back too, and are usually the only ammunition available
+    -- against the turret that fired them: nothing else on a turret's lane
+    -- necessarily comes close enough to be pushed.
+    for i = 1, #projectiles do
+        local p = projectiles[i]
+        if not p.dead and not p.pushed and p:canBeHit(playerLane, playerRange)
+        and not (blockingLaser and blockingLaser.progress > p.progress) then
+            p:push()
+        end
+    end
     return pushed
 end
 
@@ -242,10 +331,11 @@ end
 -- and draws every entity, updates the targeting markers, resolves collisions and
 -- cleans up finished entities. Player-facing consequences are returned as an event
 -- list rather than applied here:
---   { kind = "damage",    source = "enemy"|"laser", amount = n }
+--   { kind = "damage",    source = "enemy"|"laser"|"projectile", amount = n }
 --   { kind = "heal" }                          -- a booster was collected
 --   { kind = "chainKill", count = n }          -- a pushed enemy's nth chain kill
 --   { kind = "gatePassed", hitPlayer = bool }  -- a gate reached the end
+--   { kind = "turretDestroyed", points = n }   -- something was shoved into a turret
 function Field.update(playerLane, playerRange)
     local events = {}
 
@@ -254,6 +344,8 @@ function Field.update(playerLane, playerRange)
     Enemy.setPlayerLane(playerLane)
     Laser.setPlayerLane(playerLane)
     Health.setPlayerLane(playerLane)
+    Turret.setPlayerLane(playerLane)
+    Projectile.setPlayerLane(playerLane)
 
     -- Marker above the nearest enemy; blinks once that enemy is punchable.
     local lead = Field.leadingEnemy()
@@ -307,6 +399,24 @@ function Field.update(playerLane, playerRange)
         end
     end
 
+    -- Turret firing. The turret only raises a flag; the shot belongs to the field,
+    -- and leaves the barrel at the turret's own position.
+    for i = 1, #turrets do
+        local t = turrets[i]
+        if not t.dead and t.fireReady then
+            t.fireReady = false
+            Field.spawnProjectile(t.lane, t.progress)
+        end
+    end
+
+    -- Pushed-anything / Turret Collision: the only way a turret ever dies. A turret
+    -- parks far short of punching reach, so the player can't touch it directly — they
+    -- have to shove an enemy, or one of the turret's own shots, back up the lane into
+    -- it. Both the turret and whatever hit it are destroyed. Note this runs after the
+    -- gate collision above, so a gate standing in front of a turret still shields it.
+    for i = 1, #enemies     do pushedIntoTurret(enemies[i],     turrets, events) end
+    for i = 1, #projectiles do pushedIntoTurret(projectiles[i], turrets, events) end
+
     -- Passive Health pickup: collected when on the player's lane within heal range.
     for i = #healths, 1, -1 do
         local h = healths[i]
@@ -347,6 +457,26 @@ function Field.update(playerLane, playerRange)
     for i = #healths, 1, -1 do
         if healths[i].dead then
             table.remove(healths, i)
+        end
+    end
+
+    -- Clean up shots. One that reached the end only hurts the player if it arrived on
+    -- their lane — a shot down an empty lane is simply dodged.
+    for i = #projectiles, 1, -1 do
+        local p = projectiles[i]
+        if p.dead then
+            if p.reachedEnd and p.lane == playerLane then
+                events[#events+1] = { kind = "damage", source = "projectile", amount = p.damage }
+            end
+            table.remove(projectiles, i)
+        end
+    end
+
+    -- Clean up destroyed turrets. A turret never reaches the end, so there is no
+    -- arrival case to report here.
+    for i = #turrets, 1, -1 do
+        if turrets[i].dead then
+            table.remove(turrets, i)
         end
     end
 
