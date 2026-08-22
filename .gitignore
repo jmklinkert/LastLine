@@ -5,6 +5,11 @@
 builds/
 *.pdx/
 
+# Playdate Simulator crash-reporter scratch data (sentry-native). The simulator
+# writes this into whatever directory it was launched from, so it lands in the
+# repo root. Regenerated on every run and specific to this machine.
+.sentry-native/
+
 # Compiled Lua sources
 luac.out
 

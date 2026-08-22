@@ -15,6 +15,7 @@ import "deathAnimation"
 import "diamond"
 import "crosshair"
 import "sounds"
+import "music"
 import "gameOver"
 import "score"
 import "scoreboard"
@@ -26,6 +27,11 @@ local gfx = playdate.graphics
 -- Pre-build sound effects so the first playback doesn't hitch.
 Sounds.load("taking_damage")
 Sounds.load("healing")
+
+-- Same for the background songs; building them here keeps the cost at boot
+-- instead of stalling the first frame of a run.
+Music.load("Menu_song")
+Music.load("In-Game_song")
 
 
 --Scenes
@@ -369,6 +375,7 @@ local function switchToMenu()
     pd.display.setOffset(0, 0)
     currentScene = SCENE_MENU
     MenuScreen.enter()
+    Music.play("Menu_song")
 end
 
 local function switchToGame()
@@ -408,6 +415,7 @@ local function switchToGame()
     Field.enter()
 
     currentScene = SCENE_GAME
+    Music.play("In-Game_song")
 end
 
 -- ─── Tutorial skip (system menu) ─────────────────────────────────────────────
@@ -437,6 +445,9 @@ end
 local function switchToScoreboard()
     Scoreboard.enter(finalEntries, finalIndex, Score.get(), currentWave)
     currentScene = SCENE_SCOREBOARD
+    -- The music was cut at death; bring the menu theme back with the leaderboard
+    -- so it's already running by the time the player returns to the menu.
+    Music.play("Menu_song")
 end
 
 -- From the menu into the scoreboard to browse the saved leaderboard. There's no
@@ -444,6 +455,8 @@ end
 local function switchToLeaderboard()
     Scoreboard.enter(Score.entries(), nil, nil, nil)
     currentScene = SCENE_SCOREBOARD
+    -- Already playing on the way in from the menu, so this just keeps it rolling.
+    Music.play("Menu_song")
 end
 
 -- From the menu into the interactive tutorial. Sets up the same field scene as the
@@ -464,11 +477,14 @@ local function switchToTutorial()
     Tutorial.start()
     addTutorialSkip()
     currentScene = SCENE_TUTORIAL
+    -- The tutorial runs the full gameplay field, so it gets the gameplay song.
+    Music.play("In-Game_song")
 end
 
 -- ─── Boot into menu ─────────────────────────────────────────────────────────
  
 MenuScreen.enter()
+Music.play("Menu_song")
 
 -- ─── Input ──────────────────────────────────────────────────────────────────
 
@@ -756,6 +772,9 @@ function pd.update()
     if deathPhase == nil and playerHealth <= 0 then
         deathPhase  = "freeze"
         freezeTimer = 0
+        -- Cut the music the instant the player dies, so the freeze and the
+        -- disintegration that follows it land in silence.
+        Music.stop()
     end
 
     if deathPhase == "freeze" then
