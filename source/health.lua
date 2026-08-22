@@ -1,6 +1,7 @@
 import "CoreLibs/object"
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
+import "shadow"
 
 local gfx = playdate.graphics
 
@@ -16,6 +17,7 @@ local healthTwo  = gfx.imagetable.new("images/health_two")
 local currentPlayerLane = 1
 
 -- Share the enemy depth band so boosters interleave with enemies/gates by progress.
+-- Shadows sit on their own flat layer (Shadow.Z) beneath this whole band.
 local Z_MIN = 2
 local Z_MAX = 39
 
@@ -43,6 +45,18 @@ function Health:init(lane)
     self:setSize(400,240)
     self:updateDepth()
     self:add()
+
+    -- Companion shadow sprite, drawn on the flat shadow layer beneath all entities
+    self.shadow = Shadow.new()
+    self:refreshShadow()
+    self.shadow:add()
+end
+
+-- Point the shadow sprite at the shadow frame matching this booster's current
+-- frame/flip/lane-offset, so it tracks the booster exactly.
+function Health:refreshShadow()
+    local _, flip, frame, offset = self:getImageParams()
+    Shadow.apply(self.shadow, math.abs(offset), frame, flip)
 end
 
 -- Map progress (0 = far, 1 = at the player) onto the z-index band so closer
@@ -74,6 +88,17 @@ function Health:getImageParams()
 end
 
 -- ─── Public API ──────────────────────────────────────────────────────────────
+
+-- Removing the booster also disposes of its shadow. Every disposal path
+-- (collected, punched away, drifted past the end) routes through here, so the
+-- shadow can never outlive its booster.
+function Health:remove()
+    if self.shadow then
+        self.shadow:remove()
+        self.shadow = nil
+    end
+    Health.super.remove(self)
+end
 
 -- Used both for passive collection and for punching it away.
 function Health:kill()
@@ -114,5 +139,6 @@ function Health:update()
     local tbl, flip, frame = self:getImageParams()
     self.currentImage = tbl:getImage(frame)
     self.currentFlip = flip
+    self:refreshShadow()
     self:markDirty()
 end

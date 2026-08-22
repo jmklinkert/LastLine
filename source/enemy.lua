@@ -1,6 +1,7 @@
 import "CoreLibs/object"
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
+import "shadow"
 
 local gfx = playdate.graphics
 
@@ -12,21 +13,12 @@ local enemySame = gfx.imagetable.new("images/enemy_same")
 local enemyOne = gfx.imagetable.new("images/enemy_one")
 local enemyTwo = gfx.imagetable.new("images/enemy_two")
 
--- Parallel shadow sheets, indexed by absolute lane offset, frame-matched to the
--- enemy sheets above so a shadow can mirror its enemy's exact frame and flip.
-local shadowTables = {
-    [0] = gfx.imagetable.new("images/shadow_same"),
-    [1] = gfx.imagetable.new("images/shadow_one"),
-    [2] = gfx.imagetable.new("images/shadow_two"),
-}
-
 local currentPlayerLane = 1
 
 -- Depth ordering: enemies closer to the player (higher progress) draw in front.
 -- Kept below the death animation (z 40) and fists (z 50) so they stay foreground.
--- Shadows sit on a single flat layer (SHADOW_Z) beneath the whole enemy band, so
--- a shadow can never be drawn over any enemy.
-local SHADOW_Z = 1
+-- Shadows sit on their own flat layer (Shadow.Z) beneath this whole band, so a
+-- shadow can never be drawn over any enemy.
 local Z_MIN = 2
 local Z_MAX = 39
 
@@ -57,12 +49,8 @@ function Enemy:init(lane)
     self:updateDepth()
     self:add()
 
-    -- Companion shadow sprite, drawn on the flat SHADOW_Z layer beneath all enemies
-    self.shadow = gfx.sprite.new()
-    self.shadow:setCenter(0,0)
-    self.shadow:moveTo(0,0)
-    self.shadow:setSize(400,240)
-    self.shadow:setZIndex(SHADOW_Z)
+    -- Companion shadow sprite, drawn on the flat shadow layer beneath all enemies
+    self.shadow = Shadow.new()
     self:refreshShadow()
     self.shadow:add()
 end
@@ -71,7 +59,7 @@ end
 -- frame/flip/lane-offset, so it tracks the enemy exactly.
 function Enemy:refreshShadow()
     local _, flip, frame, offset = self:getImageParams()
-    self.shadow:setImage(shadowTables[math.abs(offset)]:getImage(frame), flip)
+    Shadow.apply(self.shadow, math.abs(offset), frame, flip)
 end
 
 -- Map progress (0 = far, 1 = at the player) onto the enemy z-index band so
