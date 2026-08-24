@@ -30,10 +30,15 @@ local Z_MAX = 39
 -- frame sheets run the full lane, so a lower value also means a smaller turret.
 local STOP_PROGRESS = 0.60
 
+-- Exposed so other modules can place a turret relative to where it will come to
+-- rest instead of hard-coding the number: the tutorial uses it to give its turret a
+-- head start. Read-only.
+Turret.STOP_PROGRESS = STOP_PROGRESS
+
 -- Slower than an enemy's 1/5, so a turret takes its time claiming a lane.
 local APPROACH_SPEED = 1 / 8
 
--- Frames between shots once parked. 30 Hz, so 45 frames is one shot every 1.5 s.
+-- Frames between shots once parked. At 30 Hz, 60 frames is one shot every 2 s.
 local FIRE_INTERVAL = 60
 
 function Turret.setPlayerLane(lane)

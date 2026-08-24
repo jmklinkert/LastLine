@@ -1,5 +1,6 @@
 import "CoreLibs/graphics"
 import "field"
+import "turret"
 
 local gfx = playdate.graphics
 
@@ -25,6 +26,11 @@ end
 -- accumulate across respawns within a step, so partial progress is never lost.
 local c
 
+-- Lane the turret step planted its turret on. Its ammunition keeps arriving on that
+-- lane even if the player wanders off, so the lesson stays solvable. Per-step state,
+-- cleared alongside the counters.
+local turretLane
+
 local function resetCounters()
     c = {
         moves       = 0,      -- lane changes
@@ -32,8 +38,10 @@ local function resetCounters()
         pushes      = 0,      -- super-punches that shoved at least one enemy
         chains      = 0,      -- chain kills witnessed
         heals       = 0,      -- boosters collected
+        turrets     = 0,      -- turrets destroyed
         gateDodged  = false,  -- a gate reached the end without hitting the player
     }
+    turretLane = nil
 end
 
 -- ─── Steps ───────────────────────────────────────────────────────────────────
@@ -81,6 +89,23 @@ local STEPS = {
         prompt = "Collect the booster - don't punch it!",
         spawn  = function(pl) Field.spawnHealth(pl) end,
         done   = function() return c.heals >= 1 end,
+    },
+    {
+        id     = "turret",
+        prompt = "Push back the Turret's Projectile by pressing B!",
+        -- Waiting for an empty field would never fire (the turret is never gone, and
+        -- its shots keep arriving), so re-arm whenever the last enemy is spent.
+        ready  = function() return Field.turretCount() == 0 or Field.enemyCount() == 0 end,
+        spawn  = function(pl)
+            if Field.turretCount() == 0 then
+                turretLane = pl
+                -- Head start so it digs in and gets a shot away before the enemy
+                -- below is punchable: the player should see what a turret does
+                -- before being asked to deal with one.
+                Field.spawnTurret(turretLane).progress = Turret.STOP_PROGRESS * 0.75
+            end
+        end,
+        done   = function() return c.turrets >= 1 end,
     },
     {
         id     = "graduate",
@@ -138,7 +163,13 @@ end
 function Tutorial.spawnIfNeeded(playerLane)
     if completing or pauseTimer > 0 then return end
     local s = STEPS[step]
-    if s.spawn and Field.isEmpty() and not s.done(playerLane) then
+    if not s.spawn or s.done(playerLane) then return end
+
+    -- Most steps wait for a clear field so their props arrive on an empty stage. A
+    -- step whose props are meant to stand alongside something persistent supplies its
+    -- own `ready` instead.
+    local ready = s.ready or Field.isEmpty
+    if ready() then
         s.spawn(playerLane)
     end
 end
@@ -151,6 +182,8 @@ function Tutorial.update(events, playerLane)
             c.heals += 1
         elseif ev.kind == "chainKill" then
             c.chains += 1
+        elseif ev.kind == "turretDestroyed" then
+            c.turrets += 1
         elseif ev.kind == "gatePassed" and not ev.hitPlayer then
             c.gateDodged = true
         end
@@ -188,11 +221,17 @@ function Tutorial.onLaneChange()
     c.moves += 1
 end
 
--- result is Field.punch's return: nil, or { kind = "enemy"|"laser"|"health", ... }.
+-- result is Field.punch's return: nil, or
+-- { kind = "enemy"|"laser"|"health"|"projectile", ... }.
 function Tutorial.onPunch(result)
     if not result then return end
     if result.kind == "enemy" then
         c.kills += 1
+        if STEPS[step].id == "turret" then
+            -- On this step an enemy is ammunition, not a target. A replacement
+            -- spawns straight away, so this costs nothing but the correction.
+            setHint("That was your ammo - push it with B!")
+        end
     elseif result.kind == "laser" and STEPS[step].id == "gate" then
         setHint("Gates can't be punched - dodge them!")
     elseif result.kind == "health" and STEPS[step].id == "health" then

@@ -23,10 +23,10 @@ local Z_MAX = 39
 
 -- ─── Tuning ──────────────────────────────────────────────────────────────────
 
--- Well above an enemy's 1/5: a shot crosses the whole lane in about 1.5 s where an
+-- Well above an enemy's 1/5: a shot crosses the whole lane in about 2.5 s where an
 -- enemy takes 5 s, so it reads as fast and has to be reacted to rather than planned
--- around. Fired from the turret's parking spot, it covers the remaining lane in
--- roughly a second.
+-- around. Fired from the turret's parking spot it only has the rest of the lane to
+-- cover, which takes about a second.
 local SPEED = 1 / 2.5
 
 -- A shot only hurts the player it actually reaches, so it's cheaper than walking

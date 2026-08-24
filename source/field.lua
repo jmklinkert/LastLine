@@ -100,8 +100,11 @@ function Field.spawnHealth(lane)
     table.insert(healths, Health(lane))
 end
 
+-- Returns the turret so callers (the tutorial) can give it a head start down the lane.
 function Field.spawnTurret(lane)
-    table.insert(turrets, Turret(lane))
+    local t = Turret(lane)
+    table.insert(turrets, t)
+    return t
 end
 
 -- Fired by a turret, so it starts at the turret's own position rather than at the
@@ -145,14 +148,28 @@ function Field.leadingEnemy()
     return lead
 end
 
--- The nearest enemy on a specific lane (highest progress), or nil if none.
-function Field.leadingEnemyOnLane(lane)
+-- The nearest thing on a lane that's worth aiming a punch at (highest progress), or
+-- nil if there's nothing. That means enemies and the shots turrets fire: both are
+-- destroyed by a punch, and a shot in particular is small and fast enough that its
+-- punchable window is hard to judge without the crosshair calling it out.
+--
+-- Gates and boosters are deliberately left out even though a punch does connect with
+-- them — a gate can't be destroyed and a booster shouldn't be, so the crosshair would
+-- be inviting a mistake in both cases.
+function Field.leadingTargetOnLane(lane)
     local lead, best = nil, -1
     for i = 1, #enemies do
         local e = enemies[i]
         if not e.dead and e.lane == lane and e.progress > best then
             best = e.progress
             lead = e
+        end
+    end
+    for i = 1, #projectiles do
+        local p = projectiles[i]
+        if not p.dead and p.lane == lane and p.progress > best then
+            best = p.progress
+            lead = p
         end
     end
     return lead
@@ -352,9 +369,10 @@ function Field.update(playerLane, playerRange)
     local punchable = lead ~= nil and lead:canBeHit(playerLane, playerRange)
     Diamond.update(lead, punchable)
 
-    -- Crosshair tracks the nearest enemy on the current lane: arrows close in as it
-    -- approaches, and the punchable reticle replaces it once it's in range.
-    local laneLead = Field.leadingEnemyOnLane(playerLane)
+    -- Crosshair tracks the nearest punchable thing on the current lane — an enemy or
+    -- an incoming shot: arrows close in as it approaches, and the punchable reticle
+    -- replaces it once it's in range.
+    local laneLead = Field.leadingTargetOnLane(playerLane)
     local lanePunchable = laneLead ~= nil and laneLead:canBeHit(playerLane, playerRange)
     Crosshair.update(laneLead, lanePunchable, 1 - playerRange / 100)
 

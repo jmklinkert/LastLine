@@ -63,9 +63,10 @@ function Crosshair.enter()
 end
 
 -- Drive the crosshair each game-scene frame, BEFORE gfx.sprite.update().
---   lead          : nearest enemy on the player's current lane, or nil
---   isPunchable   : true if that enemy is within punching distance
---   punchThreshold: progress value at which an enemy becomes punchable (0..1)
+--   lead          : nearest punchable thing on the player's current lane (an enemy
+--                   or an incoming turret shot), or nil
+--   isPunchable   : true if that target is within punching distance
+--   punchThreshold: progress value at which a target becomes punchable (0..1)
 function Crosshair.update(lead, isPunchable, punchThreshold)
     ensureSprite()
 
