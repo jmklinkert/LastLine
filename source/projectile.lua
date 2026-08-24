@@ -27,7 +27,7 @@ local Z_MAX = 39
 -- enemy takes 5 s, so it reads as fast and has to be reacted to rather than planned
 -- around. Fired from the turret's parking spot it only has the rest of the lane to
 -- cover, which takes about a second.
-local SPEED = 1 / 2.5
+local SPEED = 1 / 4
 
 -- A shot only hurts the player it actually reaches, so it's cheaper than walking
 -- into an enemy; the pressure comes from the cadence, not from any single hit.
