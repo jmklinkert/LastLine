@@ -32,7 +32,7 @@ local STEPS_PER_BEAT = 4   -- treat each note slot as a 1/16th step
 -- across the whole spectrum rather than concentrated at one frequency.
 local DEFAULT_VOLUME = 1.0
 local VOLUMES = {
-    enemy_death = 0.35,
+    enemy_death = 0.20,
 }
 
 local cache = {}   -- name -> playdate.sound.sequence
