@@ -29,6 +29,7 @@ local gfx = playdate.graphics
 -- Pre-build sound effects so the first playback doesn't hitch.
 Sounds.load("taking_damage")
 Sounds.load("healing")
+Sounds.load("enemy_death")
 
 -- Same for the background songs; building them here keeps the cost at boot
 -- instead of stalling the first frame of a run.

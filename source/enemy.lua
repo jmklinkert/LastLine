@@ -2,6 +2,7 @@ import "CoreLibs/object"
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "shadow"
+import "sounds"
 
 local gfx = playdate.graphics
 
@@ -110,10 +111,18 @@ function Enemy:remove()
     Enemy.super.remove(self)
 end
 
--- Remove the enemy immediately. The death animation (if any) is driven
--- separately by the caller; the sprite itself just disappears.
+-- Defeat the enemy immediately. The death animation (if any) is driven separately by
+-- the caller; the sprite itself just disappears.
+--
+-- This is the choke point for every way the *player* takes an enemy down — punched,
+-- chained by a pushed enemy, shoved into a gate or a turret, or driven off the far
+-- end of the lane — so the death sound belongs here rather than at each call site.
+-- The one death it deliberately doesn't cover is an enemy reaching the player, which
+-- goes through remove() directly: that's a hit taken, not a kill earned, and it has
+-- its own damage sound.
 function Enemy:kill()
     self.dead = true
+    Sounds.play("enemy_death")
     self:remove()
 end
 
@@ -146,10 +155,11 @@ function Enemy:update()
         --Move backwards at double speed 
         self.progress -= (self.speed*2)/30
 
-        --Reached the far end of the lane -> simply destroyed, no player damage 
+        --Reached the far end of the lane -> simply destroyed, no player damage.
+        --Routed through kill() because this is still a defeat the player earned with
+        --a super-punch, and it should sound like one; the two are otherwise identical.
         if self.progress <= 0 then
-            self.dead = true
-            self:remove()
+            self:kill()
             return
         end
     else
