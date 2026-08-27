@@ -9,6 +9,7 @@ import "laser"
 import "health"
 import "turret"
 import "projectile"
+import "boss"
 import "menuScreen"
 import "field"
 import "tutorial"
@@ -229,7 +230,9 @@ local waveMsgTimer = 0
 -- Bake the "Wave N" text into a small boxed image so it reads on any background
 -- and can be faded as one unit.
 local function bakeWaveMessage(n)
-    local text = "Wave " .. n
+    -- A boss wave is announced by name rather than by number, so the arrival reads as
+    -- an event instead of just the next count.
+    local text = (n == nil) and "Boss Wave!" or ("Wave " .. n)
     local tw, th = gfx.getTextSize(text)
     local w, h = tw + WAVE_MSG_PAD * 2, th + WAVE_MSG_PAD * 2
 
@@ -412,6 +415,7 @@ local function switchToGame()
 
     -- Clear any field entities left from a previous run
     Field.reset()
+    Boss.reset()
 
     -- Reset wave state; first wave arrives after the clear delay
     waveCount  = 0
@@ -508,6 +512,10 @@ Music.play("Menu_song")
 -- Shift the player one lane in dir (-1 = left, +1 = right), clamped to the three
 -- lanes. Returns true if the lane actually changed. Shared by the game and tutorial.
 local function shiftLane(dir)
+    -- Pinned in place while the boss manoeuvres (its arrival, the mid-fight heal and
+    -- the phase transition all play out with the player held in the middle lane).
+    if Boss.locksPlayer() then return false end
+
     local previousLane = playerLane
     playerLane = math.max(LEFTLANE, math.min(RIGHTLANE, playerLane + dir))
     if playerLane ~= previousLane then
@@ -594,6 +602,18 @@ function pd.AButtonDown()
     -- Dead and slowing down: ignore further punches
     if deathPhase ~= nil then return end
 
+    -- Hands are down while the boss manoeuvres.
+    if Boss.locksPlayer() then return end
+
+    -- In phase 2 the ship has closed to arm's length, so a punch lands on the hull
+    -- instead of the empty lane behind it. A punch thrown while the previous one is
+    -- still swinging is dropped outright rather than restarting the fists, which is
+    -- what keeps every point of damage tied to a fist that visibly connected.
+    if Boss.acceptsPunches() then
+        if Boss.onPunch() then Fists.punch() end
+        return
+    end
+
     -- In-game punch: Field resolves the hit (kill/hurt + punch pose + death flash);
     -- here we apply the run's consequences — score an enemy, take damage from a gate.
     local hit = Field.punch(playerLane, playerRange)
@@ -616,6 +636,7 @@ function pd.BButtonDown()
         return
     end
     if currentScene ~= SCENE_GAME or deathPhase ~= nil then return end
+    if Boss.locksPlayer() then return end
     if superPunchTimer > 0 then return end
     superPunchTimer = SUPER_PUNCH_COOLDOWN
     Field.superPunch(playerLane, playerRange)
@@ -631,8 +652,25 @@ local function runGameFrame()
     applyScreenShake()
 
 
-    -- Wave spawning logic
-    if #spawnQueue > 0 then
+    -- Boss fight. It runs before the field so the enemies it fires are simulated the
+    -- same frame, and it reports laser hits and its own defeat back the way Field does.
+    for _, ev in ipairs(Boss.update(playerLane)) do
+        if ev.kind == "damage" then
+            takeDamage(ev.amount)
+        elseif ev.kind == "bossDefeated" then
+            Score.add(ev.points)
+        elseif ev.kind == "centerPlayer" then
+            -- The boss pins the player between phases; only main.lua owns the lane.
+            playerLane = MIDDLELANE
+            updateBg()
+        end
+    end
+
+    -- Wave spawning logic. A boss wave replaces the machinery below entirely: there's
+    -- no queue to drain and no clear timer, because the fight decides when it's over.
+    if Boss.isActive() then
+        -- Nothing to schedule; the boss spawns through Field on its own clock.
+    elseif #spawnQueue > 0 then
         -- Mid-wave: count down to the next entity in the burst. Every entity uses
         -- the same delay; gates additionally keep their own lane clear (see spawn lane pick).
         spawnDelay -= 1
@@ -665,6 +703,13 @@ local function runGameFrame()
         -- from the last wave is gone (defeated, reached the end, or—for gates—cleared
         -- the lane). Pushed enemies are retreating and don't count. While any remain,
         -- keep the timer pinned at full so it begins counting only after the field clears.
+        -- The fight just ended: clear it down and give the usual breather before the
+        -- run picks back up at the next ordinary wave.
+        if Boss.isFinished() then
+            Boss.reset()
+            waveTimer = WAVE_CLEAR_DELAY
+        end
+
         if Field.hasActiveHazards() then
             waveTimer = WAVE_CLEAR_DELAY
         else
@@ -677,13 +722,26 @@ local function runGameFrame()
             end
             waveTimer -= 1
             if waveTimer <= 0 then
-                -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
-                spawnQueue = buildSpawnQueue(waveCount)
-                spawnDelay = 0
-                waveClearScored = false
                 -- waveCount counts completed waves, so the one starting is waveCount + 1
                 currentWave = waveCount + 1
-                showWaveMessage(waveCount + 1)
+                waveClearScored = false
+
+                if Boss.isBossWave(waveCount) then
+                    -- No queue at all: boss waves carry no ordinary enemies, gates or
+                    -- boosters. The player is planted in the middle lane for the
+                    -- arrival, and the wave counts as spawned right away since there
+                    -- is nothing left for the spawner to do.
+                    playerLane = MIDDLELANE
+                    updateBg()
+                    Boss.begin()
+                    showWaveMessage(nil)   -- "Boss Wave!"
+                    waveCount += 1
+                else
+                    -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
+                    spawnQueue = buildSpawnQueue(waveCount)
+                    spawnDelay = 0
+                    showWaveMessage(waveCount + 1)
+                end
             end
         end
     end
@@ -710,6 +768,7 @@ local function runGameFrame()
         superPunchTimer -= 1
     end
     drawHealthBar()
+    Boss.draw()
     drawScore()
     drawSuperCooldownBar()
     drawWaveMessage()

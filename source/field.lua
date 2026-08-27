@@ -96,8 +96,11 @@ function Field.spawnLaser(lane)
     table.insert(lasers, Laser(lane))
 end
 
+-- Returns the booster so callers (the boss) can place it partway down the lane.
 function Field.spawnHealth(lane)
-    table.insert(healths, Health(lane))
+    local h = Health(lane)
+    table.insert(healths, h)
+    return h
 end
 
 -- Returns the turret so callers (the tutorial) can give it a head start down the lane.
@@ -248,6 +251,32 @@ local function pushedIntoTurret(pusher, turretList, events)
         end
     end
     return false
+end
+
+-- Destroy every pushed enemy that has retreated to or past `progress`, and report how
+-- many there were. The boss sits at a fixed point up the lane, so anything shoved back
+-- that far has struck the hull; this is the same idea as the turret collision, but
+-- against something that spans every lane rather than holding one.
+function Field.collectPushedPast(progress)
+    local hits = 0
+    for i = 1, #enemies do
+        local e = enemies[i]
+        if e.pushed and not e.dead and e.progress <= progress then
+            e:kill()
+            hits += 1
+        end
+    end
+    return hits
+end
+
+-- Destroy every live enemy outright. The boss uses this at its phase change: the
+-- player is pinned in place for the transition, so anything still in flight would land
+-- as an unavoidable hit.
+function Field.clearEnemies()
+    for i = 1, #enemies do
+        local e = enemies[i]
+        if not e.dead then e:kill() end
+    end
 end
 
 -- ─── Player actions ──────────────────────────────────────────────────────────
