@@ -32,8 +32,16 @@ local STEPS_PER_BEAT = 4   -- treat each note slot as a 1/16th step
 -- across the whole spectrum rather than concentrated at one frequency.
 local DEFAULT_VOLUME = 1.0
 local VOLUMES = {
-    enemy_death = 0.20,
+    enemy_death = 0.8,
 }
+
+-- The exporter changed format partway through this project. Older files list one
+-- value per step; newer ones list (pitch, octave, length) triplets, the same shape the
+-- songs use. Both kinds sit in sounds/, so detect rather than convert: a triplet file
+-- holds exactly three slots per tick, which no flat file does.
+local function isTriplet(notes, ticks)
+    return ticks ~= nil and #notes > 0 and #notes % 3 == 0 and #notes == ticks * 3
+end
 
 local cache = {}   -- name -> playdate.sound.sequence
 
@@ -55,16 +63,31 @@ local function build(name)
 
         local synth = snd.synth.new(WAVEFORMS[t.type] or snd.kWaveSquare)
         local env = t.envelope or {}
-        -- No sustain level in the export, so these read as percussive blips.
-        synth:setADSR(env.attack or 0, env.decay or 0, 0, env.release or 0)
-        synth:setVolume(VOLUMES[name] or DEFAULT_VOLUME)
+        -- Newer exports carry sustain and a per-track volume; older ones have neither,
+        -- and default to the percussive blip the originals were built around.
+        synth:setADSR(env.attack or 0, env.decay or 0, env.sustain or 0, env.release or 0)
+        synth:setVolume((env.volume or 1) * (VOLUMES[name] or DEFAULT_VOLUME))
 
         local track = seq:addTrack()
         track:setInstrument(snd.instrument.new(synth))
 
-        for i, note in ipairs(t.notes or {}) do
-            if note ~= 0 then
-                track:addNote(i, BASE_NOTE + note, 1)  -- step i, one step long
+        local notes = t.notes or {}
+        if isTriplet(notes, t.ticks) then
+            -- (pitch, octave, length) per step; pitch is a 1-based piano-roll row and
+            -- 0 means rest, matching how music.lua reads the songs.
+            for i = 1, #notes - 2, 3 do
+                local pitch, octave, length = notes[i], notes[i + 1], notes[i + 2]
+                if pitch > 0 then
+                    track:addNote((i - 1) // 3 + 1,
+                                  (octave + 1) * 12 + pitch - 1,
+                                  math.max(length, 1))
+                end
+            end
+        else
+            for i, note in ipairs(notes) do
+                if note ~= 0 then
+                    track:addNote(i, BASE_NOTE + note, 1)  -- step i, one step long
+                end
             end
         end
     end

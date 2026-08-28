@@ -31,11 +31,15 @@ local gfx = playdate.graphics
 Sounds.load("taking_damage")
 Sounds.load("healing")
 Sounds.load("enemy_death")
+Sounds.load(Boss.SFX_SPAWN)
+Sounds.load(Boss.SFX_CHARGE)
+Sounds.load(Boss.SFX_LASER)
 
 -- Same for the background songs; building them here keeps the cost at boot
 -- instead of stalling the first frame of a run.
 Music.load("Menu_song")
 Music.load("In-Game_song")
+Music.load(Boss.SONG)
 
 
 --Scenes
@@ -707,6 +711,7 @@ local function runGameFrame()
         -- run picks back up at the next ordinary wave.
         if Boss.isFinished() then
             Boss.reset()
+            Music.play("In-Game_song")   -- back to the ordinary run
             waveTimer = WAVE_CLEAR_DELAY
         end
 
@@ -734,6 +739,7 @@ local function runGameFrame()
                     playerLane = MIDDLELANE
                     updateBg()
                     Boss.begin()
+                    Music.play(Boss.SONG)
                     showWaveMessage(nil)   -- "Boss Wave!"
                     waveCount += 1
                 else

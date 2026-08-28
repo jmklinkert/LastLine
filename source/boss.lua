@@ -1,6 +1,7 @@
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "field"
+import "sounds"
 
 local gfx = playdate.graphics
 
@@ -156,6 +157,12 @@ local SHAKE_FRAMES    = 7
 local SHAKE_MAGNITUDE = 3
 
 local BOSS_POINTS = 5000
+
+-- The fight's own effects. Paths are relative to sounds/, folder and all.
+Boss.SFX_SPAWN  = "Boss sounds/boss_enemy_spawn"
+Boss.SFX_CHARGE = "Boss sounds/Boss_laser_charge"
+Boss.SFX_LASER  = "Boss sounds/Boss_laser"
+Boss.SONG       = "Boss sounds/Boss_music"
 
 -- Health bar, threaded between the player's bar (which ends at x=128) and the score
 -- box (which is right-aligned and starts around x=290).
@@ -375,6 +382,7 @@ local function releaseShots()
             -- indication still played, which reads as the boss thinking better of it.
             if not laneTaken(s.lane) then
                 Field.spawnEnemy(s.lane).progress = SHIP_PROGRESS
+                Sounds.play(Boss.SFX_SPAWN)
             end
             table.remove(shots, i)
         end
@@ -411,6 +419,9 @@ end
 
 local function fireLaser(lane)
     lasers[#lasers+1] = { lane = lane, start = timer, damageTimer = 0, playerIn = false }
+    -- The charge sound belongs to the telegraph, so it plays as the charge begins
+    -- rather than when the beam lands.
+    Sounds.play(Boss.SFX_CHARGE)
 end
 
 local function scheduleLasers()
@@ -451,6 +462,9 @@ local function updateLasers(events)
         if since >= CHARGE_FRAMES + LASER_FRAMES then
             table.remove(lasers, i)
         elseif since >= CHARGE_FRAMES then
+            -- Exactly on the ignition frame, so it fires once per beam.
+            if since == CHARGE_FRAMES then Sounds.play(Boss.SFX_LASER) end
+
             local inBeam = (playerLane == l.lane)
             if inBeam then
                 -- Damage on entry as well as on the tick, so a beam can't be walked
