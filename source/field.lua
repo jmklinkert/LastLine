@@ -5,6 +5,7 @@ import "laser"
 import "health"
 import "turret"
 import "projectile"
+import "sounds"
 import "fists"
 import "deathAnimation"
 import "diamond"
@@ -453,6 +454,9 @@ function Field.update(playerLane, playerRange)
         if not t.dead and t.fireReady then
             t.fireReady = false
             Field.spawnProjectile(t.lane, t.progress)
+            -- Sounded here rather than where the turret raises the flag, so a shot
+            -- suppressed by the turret dying in the same frame stays silent too.
+            Sounds.play("turret_shot")
         end
     end
 

@@ -31,6 +31,7 @@ local gfx = playdate.graphics
 Sounds.load("taking_damage")
 Sounds.load("healing")
 Sounds.load("enemy_death")
+Sounds.load("turret_shot")
 Sounds.load(Boss.SFX_SPAWN)
 Sounds.load(Boss.SFX_CHARGE)
 Sounds.load(Boss.SFX_LASER)
