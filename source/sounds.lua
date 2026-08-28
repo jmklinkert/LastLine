@@ -63,9 +63,24 @@ local function build(name)
 
         local synth = snd.synth.new(WAVEFORMS[t.type] or snd.kWaveSquare)
         local env = t.envelope or {}
+
         -- Newer exports carry sustain and a per-track volume; older ones have neither,
         -- and default to the percussive blip the originals were built around.
-        synth:setADSR(env.attack or 0, env.decay or 0, env.sustain or 0, env.release or 0)
+        local attack  = env.attack  or 0
+        local decay   = env.decay   or 0
+        local sustain = env.sustain or 0
+        local release = env.release or 0
+
+        -- With no decay stage AND no sustain level the envelope falls from peak to
+        -- silence in zero time, so the note never sounds at all. The exporter leaves
+        -- `decay` out entirely when it was never touched, which is exactly how a sound
+        -- can come out of the editor fine and be inaudible here. Read that combination
+        -- as "no decay stage" rather than "instant silence": hold the note at full for
+        -- its length and let the release carry it out. Every effect that sets a real
+        -- decay or a real sustain is untouched by this.
+        if decay <= 0 and sustain <= 0 then sustain = 1 end
+
+        synth:setADSR(attack, decay, sustain, release)
         synth:setVolume((env.volume or 1) * (VOLUMES[name] or DEFAULT_VOLUME))
 
         local track = seq:addTrack()
