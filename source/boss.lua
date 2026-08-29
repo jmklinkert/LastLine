@@ -84,8 +84,17 @@ local laserSides = {
 
 -- A boss arrives on every Nth wave. TEST_MODE overrides that and makes the very
 -- first wave a boss wave, so the fight can be exercised without grinding to wave 30.
-Boss.WAVE_INTERVAL = 30
+Boss.WAVE_INTERVAL = 15
 Boss.TEST_MODE     = true
+
+-- How many times the fight escalates before it stops getting harder. Level 0 is the
+-- first boss and each later encounter steps up, so with 3 steps the first four bosses
+-- run at levels 0, 1, 2, 3 and every boss after that fights at level 3.
+Boss.SCALE_STEPS = 3
+
+-- Which level the TEST_MODE boss fights at, so a tier can be exercised without
+-- playing up to it. Ignored unless TEST_MODE is on.
+Boss.TEST_LEVEL = 0
 
 -- Where the ship sits in the tunnel, as a progress value on the shared 0..1 lane
 -- path. Its blasters are already 120 frames into the 150-frame approach, so the
@@ -103,26 +112,32 @@ local INDICATION_LEAD  = 15
 local INDICATION_FLASH = 8
 
 -- Frames between the end of one attack pattern and the start of the next.
-local ATTACK_REST = 45
+local BASE_ATTACK_REST = 45
+local ATTACK_REST_STEP = 8    -- subtracted per level: phase 1 presses harder
+local MIN_ATTACK_REST  = 15   -- floor, so patterns never run into each other
 -- Gap between the individual shots of the three-shot burst. An enemy needs 30 frames
 -- to cross from the ship to the player, so this spacing guarantees at most two lanes
 -- are ever occupied at once and the player always has somewhere to stand.
 local BURST_GAP = 20
 
--- Six enemies shoved back into it end phase 1.
-local PHASE1_HEALTH = 6
+-- Six enemies shoved back into it end phase 1 at level 0, two more each level up.
+local BASE_PHASE1_HEALTH = 6
+local PHASE1_HEALTH_STEP = 2
 
--- Phase 2 is a punching contest. Roughly thirty connected punches, which at the
--- 9-frame punch animation is about ten seconds of pure offence before dodging is
+-- Phase 2 is a punching contest. Roughly thirty connected punches at level 0, which at
+-- the 9-frame punch animation is about ten seconds of pure offence before dodging is
 -- counted — long enough to feel like a duel, short enough not to drag. Tune freely.
-local PHASE2_HEALTH = 30
+local BASE_PHASE2_HEALTH = 30
+local PHASE2_HEALTH_STEP = 10
 
 local CHARGE_FRAMES = 30   -- 1 s telegraph, drawn 1:1 from the 30-frame sheet
 
 -- The beam sheet holds 60 frames, but how long the beam is actually up is a balance
 -- knob, and the art is resampled to fit.
-local LASER_ART_FRAMES = 60
-local LASER_FRAMES     = 35
+local LASER_ART_FRAMES  = 60
+local BASE_LASER_FRAMES = 35
+local LASER_FRAMES_STEP = 4    -- subtracted per level: beams cycle faster
+local MIN_LASER_FRAMES  = 20   -- floor, so a beam is always a beam and not a flicker
 
 -- Breathing room between a beam dying and a neighbouring one lighting up, and the
 -- single most important number in the fight.
@@ -136,7 +151,7 @@ local LASER_FRAMES     = 35
 --
 -- This margin is exactly the dodge window: both lanes are clear together for this
 -- many frames, and measuring the simulated fight gives back precisely this number as
--- the worst case. Volleys on adjacent lanes end up LASER_FRAMES + DODGE_MARGIN apart,
+-- the worst case. Volleys on adjacent lanes end up laserFrames + DODGE_MARGIN apart,
 -- so the two together set the pace.
 local DODGE_MARGIN = 20
 -- Slightly over a second between volleys: long enough to step out, short enough that
@@ -161,8 +176,12 @@ local BOSS_POINTS = 5000
 -- The fight's own effects. Paths are relative to sounds/, folder and all.
 Boss.SFX_SPAWN  = "Boss sounds/boss_enemy_spawn"
 Boss.SFX_CHARGE = "Boss sounds/Boss_laser_charge"
-Boss.SFX_LASER  = "Boss sounds/Boss_laser"
 Boss.SONG       = "Boss sounds/Boss_music"
+
+-- The beam deliberately reuses the spawn effect rather than Boss_laser.json. The two
+-- never sound together — spawns belong to phase 1, beams to phase 2 — so sharing one
+-- clip costs nothing. Point this back at "Boss sounds/Boss_laser" to split them again.
+Boss.SFX_LASER  = "Boss sounds/Boss_laser"
 
 -- Health bar, threaded between the player's bar (which ends at x=128) and the score
 -- box (which is right-aligned and starts around x=290).
@@ -184,6 +203,16 @@ local STATE_PHASE2  = "phase2"
 local STATE_DEATH   = "death"
 local STATE_REWARD  = "reward"     -- three boosters, then the run resumes
 local STATE_DONE    = "done"
+
+-- Settings for the fight in progress, fixed when it begins. Everything that scales
+-- lives here rather than as a constant, because the same boss module runs every
+-- encounter at a different level. DODGE_MARGIN and BURST_GAP deliberately do NOT
+-- scale: those two are the fairness and safety guarantees, not difficulty dials.
+local level        = 0
+local phase1Health = 0
+local phase2Health = 0
+local attackRest   = 0
+local laserFrames  = 0
 
 local state = STATE_IDLE
 local timer = 0            -- frames elapsed in the current state
@@ -290,11 +319,11 @@ local function drawOverlay()
             else
                 local tbl = effectArt(l.lane, laserMiddle, laserSides)
                 local burn = since - CHARGE_FRAMES
-                if tbl and burn < LASER_FRAMES then
+                if tbl and burn < laserFrames then
                     -- The sheet is resampled onto however long the beam actually
-                    -- burns, so the whole animation plays out whatever LASER_FRAMES
+                    -- burns, so the whole animation plays out whatever laserFrames
                     -- is set to rather than being cut off partway.
-                    local f = math.floor(burn * LASER_ART_FRAMES / LASER_FRAMES) + 1
+                    local f = math.floor(burn * LASER_ART_FRAMES / laserFrames) + 1
                     tbl:getImage(math.min(f, LASER_ART_FRAMES)):draw(0, 0, effectFlip(l.lane))
                 end
             end
@@ -370,7 +399,7 @@ local function scheduleAttack()
         duration = 2 * BURST_GAP
     end
 
-    nextAttackAt = first + duration + ATTACK_REST
+    nextAttackAt = first + duration + attackRest
 end
 
 -- Fire everything whose moment has come, and drop it from the queue.
@@ -410,7 +439,7 @@ end
 local function canFire(lane, at)
     for i = 1, #lasers do
         local l = lasers[i]
-        if math.abs(l.lane - lane) <= 1 and at < l.start + LASER_FRAMES + DODGE_MARGIN then
+        if math.abs(l.lane - lane) <= 1 and at < l.start + laserFrames + DODGE_MARGIN then
             return false
         end
     end
@@ -459,7 +488,7 @@ local function updateLasers(events)
     for i = #lasers, 1, -1 do
         local l = lasers[i]
         local since = timer - l.start
-        if since >= CHARGE_FRAMES + LASER_FRAMES then
+        if since >= CHARGE_FRAMES + laserFrames then
             table.remove(lasers, i)
         elseif since >= CHARGE_FRAMES then
             -- Exactly on the ignition frame, so it fires once per beam.
@@ -489,6 +518,17 @@ end
 function Boss.isBossWave(waveCount)
     if Boss.TEST_MODE then return waveCount == 0 end
     return (waveCount + 1) % Boss.WAVE_INTERVAL == 0
+end
+
+-- Which escalation level a boss appearing on `wave` fights at. Bosses land on every
+-- WAVE_INTERVAL-th wave, so the first is level 0, the next level 1, and so on until
+-- SCALE_STEPS increases have happened; after that every boss is at the hardest level.
+function Boss.levelFor(wave)
+    if Boss.TEST_MODE then
+        return math.max(0, math.min(Boss.SCALE_STEPS, Boss.TEST_LEVEL))
+    end
+    local n = math.floor((wave - 1) / Boss.WAVE_INTERVAL)
+    return math.max(0, math.min(Boss.SCALE_STEPS, n))
 end
 
 function Boss.isActive()
@@ -524,11 +564,21 @@ function Boss.reset()
 end
 
 -- Start the fight. The caller has already cleared the field and shown the banner.
-function Boss.begin()
+function Boss.begin(wave)
     ensureSprites()
+
+    -- Lock in this encounter's difficulty. Both phases get tougher and both of the
+    -- boss's rhythms tighten; the dodge window and the burst spacing are left alone
+    -- on purpose, since those are what keep the fight survivable at any level.
+    level        = Boss.levelFor(wave or 1)
+    phase1Health = BASE_PHASE1_HEALTH + PHASE1_HEALTH_STEP * level
+    phase2Health = BASE_PHASE2_HEALTH + PHASE2_HEALTH_STEP * level
+    attackRest   = math.max(MIN_ATTACK_REST,  BASE_ATTACK_REST  - ATTACK_REST_STEP  * level)
+    laserFrames  = math.max(MIN_LASER_FRAMES, BASE_LASER_FRAMES - LASER_FRAMES_STEP * level)
+
     state = STATE_INTRO
     timer = 0
-    health, maxHealth = 0, PHASE1_HEALTH   -- bar fills over the arrival
+    health, maxHealth = 0, phase1Health   -- bar fills over the arrival
     shots, lasers = {}, {}
     shakeTimer, punchLockout, pendingHit = 0, 0, -1
     bodySprite:add()
@@ -570,7 +620,7 @@ function Boss.update(lane)
         if timer >= INTRO_FRAMES then
             state, timer = STATE_PHASE1, 0
             health = maxHealth
-            nextAttackAt = ATTACK_REST
+            nextAttackAt = attackRest
         end
 
     elseif state == STATE_PHASE1 then
@@ -596,7 +646,7 @@ function Boss.update(lane)
             events[#events+1] = { kind = "centerPlayer" }
 
             state, timer = STATE_TRANS, 0
-            maxHealth = PHASE2_HEALTH
+            maxHealth = phase2Health
             health = 0
         end
 

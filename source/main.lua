@@ -739,7 +739,7 @@ local function runGameFrame()
                     -- is nothing left for the spawner to do.
                     playerLane = MIDDLELANE
                     updateBg()
-                    Boss.begin()
+                    Boss.begin(currentWave)   -- the wave sets the difficulty level
                     Music.play(Boss.SONG)
                     showWaveMessage(nil)   -- "Boss Wave!"
                     waveCount += 1
