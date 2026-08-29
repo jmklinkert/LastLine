@@ -85,7 +85,7 @@ local laserSides = {
 -- A boss arrives on every Nth wave. TEST_MODE overrides that and makes the very
 -- first wave a boss wave, so the fight can be exercised without grinding to wave 30.
 Boss.WAVE_INTERVAL = 15
-Boss.TEST_MODE     = true
+Boss.TEST_MODE     = false
 
 -- How many times the fight escalates before it stops getting harder. Level 0 is the
 -- first boss and each later encounter steps up, so with 3 steps the first four bosses
