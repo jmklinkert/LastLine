@@ -2,6 +2,7 @@ import "CoreLibs/object"
 import "CoreLibs/graphics"
 import "CoreLibs/sprites"
 import "shadow"
+import "sounds"
 
 local gfx = playdate.graphics
 
@@ -124,8 +125,15 @@ end
 
 -- Destroyed. The only route here is Field shoving a pushed enemy or projectile
 -- back into it; nothing the player can reach directly will call this.
+--
+-- Whatever did the shoving dies in the same statement, so on the enemy route this
+-- plays alongside Enemy:kill(). That can't double up: Sounds.play stops and rewinds a
+-- single cached sequence per name, so two calls in one frame restart it rather than
+-- layer, and only one sound is heard. Being explicit here is what makes the projectile
+-- route audible — a shot shoved back into a turret killed it in silence before.
 function Turret:kill()
     self.dead = true
+    Sounds.play("enemy_death")
     self:remove()
 end
 
