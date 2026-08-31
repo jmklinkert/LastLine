@@ -740,26 +740,40 @@ local function runGameFrame()
             end
             waveTimer -= 1
             if waveTimer <= 0 then
-                -- waveCount counts completed waves, so the one starting is waveCount + 1
-                currentWave = waveCount + 1
-                waveClearScored = false
+                local bossNext = Boss.isBossWave(waveCount)
 
-                if Boss.isBossWave(waveCount) then
-                    -- No queue at all: boss waves carry no ordinary enemies, gates or
-                    -- boosters. The player is planted in the middle lane for the
-                    -- arrival, and the wave counts as spawned right away since there
-                    -- is nothing left for the spawner to do.
-                    playerLane = MIDDLELANE
-                    updateBg()
-                    Boss.begin(currentWave)   -- the wave sets the difficulty level
-                    Music.play(Boss.SONG)
-                    showWaveMessage(nil)   -- "Boss Wave!"
-                    waveCount += 1
-                else
-                    -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
-                    spawnQueue = buildSpawnQueue(waveCount)
-                    spawnDelay = 0
-                    showWaveMessage(waveCount + 1)
+                -- A boss wave additionally waits for a genuinely empty tunnel. The
+                -- check above deliberately ignores turrets, because a turret holds its
+                -- lane until destroyed and counting it would pin the wave timer
+                -- forever — but that also means one can still be standing (and firing)
+                -- when the ship arrives, which is not a fight anyone asked for. So the
+                -- ship holds off until the lanes are actually clear.
+                --
+                -- Nothing below may run while waiting: waveClearScored is reset here,
+                -- and re-running that every frame would pay the wave-clear bonus over
+                -- and over.
+                if not bossNext or Field.isEmpty() then
+                    -- waveCount counts completed waves, so the one starting is waveCount + 1
+                    currentWave = waveCount + 1
+                    waveClearScored = false
+
+                    if bossNext then
+                        -- No queue at all: boss waves carry no ordinary enemies, gates
+                        -- or boosters. The player is planted in the middle lane for the
+                        -- arrival, and the wave counts as spawned right away since there
+                        -- is nothing left for the spawner to do.
+                        playerLane = MIDDLELANE
+                        updateBg()
+                        Boss.begin(currentWave)   -- the wave sets the difficulty level
+                        Music.play(Boss.SONG)
+                        showWaveMessage(nil)   -- "Boss Wave!"
+                        waveCount += 1
+                    else
+                        -- Start a new wave; the first entity spawns immediately (spawnDelay = 0)
+                        spawnQueue = buildSpawnQueue(waveCount)
+                        spawnDelay = 0
+                        showWaveMessage(waveCount + 1)
+                    end
                 end
             end
         end
