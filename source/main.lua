@@ -317,17 +317,16 @@ local function lasersPerWave(waveCount)
     return math.min(LASERS_MAX, math.floor(rampLevel(waveCount) / 2))
 end
 
--- Turrets ramp exactly like gates. They hold a lane until destroyed, so the three
--- lanes cap how many can ever stand at once; anything the ramp asks for beyond a
--- free lane is dropped at spawn time.
---
--- TURRET_TEST_MODE forces one every wave so the mechanic can be exercised without
--- grinding out the ramp. Set it to false for the real curve.
-local TURRETS_MAX = 3
-local TURRET_TEST_MODE = true
+-- One turret per wave, but not from the very start: the opening waves stay clean so
+-- the player meets ordinary enemies and gates first. No ramp beyond that, because a
+-- turret holds its lane until destroyed — the three lanes are the real cap, and
+-- Field.pickTurretLane drops the spawn when they are all already held. That makes the
+-- number standing self-limiting, which is why one per wave settles where it does.
+local TURRET_FIRST_WAVE = 3
 local function turretsPerWave(waveCount)
-    if TURRET_TEST_MODE then return 1 end
-    return math.min(TURRETS_MAX, math.floor(rampLevel(waveCount) / 2))
+    -- waveCount counts completed waves, so the one about to start is waveCount + 1.
+    if (waveCount + 1) < TURRET_FIRST_WAVE then return 0 end
+    return 1
 end
 
 -- Health boosters: each wave has at most one, with the chance climbing linearly
@@ -505,6 +504,19 @@ local function switchToTutorial()
     currentScene = SCENE_TUTORIAL
     -- The tutorial runs the full gameplay field, so it gets the gameplay song.
     Music.play("In-Game_song")
+end
+
+-- ─── System pause ───────────────────────────────────────────────────────────
+-- Opening the Playdate's own menu does not stop a running sound sequence, so without
+-- these the music carries on playing underneath it. Suspend remembers the song and
+-- the playhead, so resuming continues rather than restarting.
+
+function pd.gameWillPause()
+    Music.suspend()
+end
+
+function pd.gameWillResume()
+    Music.resume()
 end
 
 -- ─── Boot into menu ─────────────────────────────────────────────────────────
@@ -779,7 +791,6 @@ local function runGameFrame()
     drawScore()
     drawSuperCooldownBar()
     drawWaveMessage()
-    pd.drawFPS(0,220)
 end
 
 -- Hand the death slow-motion's final frame off to the GameOver module and tear

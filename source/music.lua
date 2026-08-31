@@ -165,6 +165,7 @@ end
 -- ─── Playback ───────────────────────────────────────────────────────────────
 
 local currentName = nil
+local suspended = false   -- true while the system pause menu is holding the song
 
 -- Pre-build a song so the first playback doesn't hitch.
 function Music.load(name)
@@ -197,4 +198,29 @@ function Music.stop()
         seq:allNotesOff()   -- kill any note still sounding its release tail
     end
     currentName = nil
+    suspended = false
+end
+
+-- ─── System pause ────────────────────────────────────────────────────────────
+-- Opening the Playdate's own menu doesn't silence a running sequence, so the song
+-- would otherwise carry on underneath it. These halt it without forgetting which
+-- song was playing, so the scene picks up where it left off rather than restarting.
+
+-- Silence the song but remember it. Safe to call when nothing is playing.
+function Music.suspend()
+    if suspended or not currentName then return end
+    local seq = cache[currentName]
+    if seq then
+        seq:stop()
+        seq:allNotesOff()
+    end
+    suspended = true
+end
+
+-- Carry on from where suspend() left the playhead.
+function Music.resume()
+    if not suspended then return end
+    suspended = false
+    local seq = currentName and cache[currentName]
+    if seq then seq:play() end
 end

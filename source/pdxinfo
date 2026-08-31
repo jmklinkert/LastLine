@@ -1,7 +1,7 @@
 name=LastLine
 author=Leonard Mottke & Janne Klinkert
-description=
-bundleID=
+description=Hold the last line. Punch, dodge and shove back an endless assault down three lanes. How long can you last?
+bundleID=com.silvermo.lastline
 version=1.1.0
-buildNumber=1
+buildNumber=2
 imagePath=SystemAssets

@@ -27,7 +27,6 @@ function Enemy.setPlayerLane(lane)
     currentPlayerLane = lane
 end
 
-print(enemySame:getLength(), enemyOne:getLength(), enemyTwo:getLength())
 function Enemy:init(lane)
     Enemy.super.init(self)
 
